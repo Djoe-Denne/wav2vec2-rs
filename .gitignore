@@ -1,0 +1,20 @@
+/target
+
+# Keep Cargo.lock for applications; ignore for libraries if preferred.
+Cargo.lock
+#! Cargo.lock
+
+# Rustfmt backup files
+**/*.rs.bk
+
+# Python bytecode
+__pycache__/
+
+# Visual Studio / MSVC debug symbols
+*.pdb
+
+models/
+tests/test_settings.json
+test-data/
+
+.venv/
