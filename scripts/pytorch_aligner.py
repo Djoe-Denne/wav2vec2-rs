@@ -294,7 +294,9 @@ def align_utterance(
         return []
 
     path = forced_align_viterbi(log_probs, tokens)
-    return group_into_words(path, tokens, chars, log_probs, blank_id, sep_id, stride_ms)
+    words = group_into_words(path, tokens, chars, log_probs, blank_id, sep_id, stride_ms)
+
+    return words
 
 
 def align_subset(

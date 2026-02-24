@@ -1,19 +1,27 @@
 [package]
 name = "wav2vec2-rs"
-version.workspace = true
-edition.workspace = true
-authors.workspace = true
-license.workspace = true
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-candle-core = { workspace = true }
-candle-nn = { workspace = true }
-safetensors = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-thiserror = { workspace = true }
-tracing = { workspace = true }
+candle-core = "0.9.1"
+candle-nn = "0.9.1"
+safetensors = "0.4.5"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tracing = "0.1"
 
 [features]
 default = []
 cuda = ["candle-core/cuda"]
+
+[dev-dependencies]
+claxon = "0.4.3"
+libtest-mimic = "0.8.1"
+rand = "0.9.2"
+
+[[test]]
+name = "alignment_reference"
+path = "tests/alignment_reference.rs"
+harness = false
