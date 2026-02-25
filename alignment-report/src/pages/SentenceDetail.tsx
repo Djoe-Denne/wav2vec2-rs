@@ -1,4 +1,3 @@
-import React from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Plot from 'react-plotly.js';
 import { useReports } from '../context/ReportContext';
@@ -9,6 +8,20 @@ export function SentenceDetail() {
   const navigate = useNavigate();
 
   const sentence = selectedReport?.data.sentences.find((s) => s.id === id);
+  const outlierTags: string[] = [];
+
+  if (selectedReport?.data.aggregates?.outliers && sentence) {
+    const outliers = selectedReport.data.aggregates.outliers;
+    if (outliers.worst_abs_err_ms_p90?.some((entry) => entry.id === sentence.id)) {
+      outlierTags.push('abs_p90');
+    }
+    if (outliers.worst_drift_ms_per_sec?.some((entry) => entry.id === sentence.id)) {
+      outlierTags.push('drift');
+    }
+    if (outliers.worst_low_conf_word_ratio?.some((entry) => entry.id === sentence.id)) {
+      outlierTags.push('low_conf');
+    }
+  }
 
   if (!sentence) {
     return (
@@ -75,8 +88,24 @@ export function SentenceDetail() {
         />
       </div>
 
+      {outlierTags.length > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded p-3">
+          <div className="text-sm font-medium text-indigo-700">Outlier Tags</div>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {outlierTags.map((tag) => (
+              <span key={tag} className="px-2 py-1 rounded text-xs bg-indigo-100 text-indigo-700">
+                {tag}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="bg-white rounded shadow p-4">
         <h3 className="font-semibold mb-3">Confidence Metrics</h3>
+        <p className="text-xs text-gray-600 mb-3">
+          Confidence summarizes how sure the aligner is about each predicted word boundary.
+        </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <InfoCard
             label="Mean Calibrated Confidence"
@@ -99,6 +128,9 @@ export function SentenceDetail() {
 
       <div className="bg-white rounded shadow p-4">
         <h3 className="font-semibold mb-3">Timing Metrics</h3>
+        <p className="text-xs text-gray-600 mb-3">
+          Timing compares predicted word boundaries against reference timestamps.
+        </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <InfoCard
             label="Abs Err Median"
@@ -116,11 +148,22 @@ export function SentenceDetail() {
             label="Drift"
             value={`${sentence.timing.drift_ms_per_sec.toFixed(2)} ms/s`}
           />
+          <InfoCard
+            label="Drift Delta"
+            value={
+              sentence.timing.drift_delta_ms == null
+                ? 'N/A'
+                : `${sentence.timing.drift_delta_ms.toFixed(1)} ms`
+            }
+          />
         </div>
       </div>
 
       <div className="bg-white rounded shadow p-4">
         <h3 className="font-semibold mb-3">Structural Metrics</h3>
+        <p className="text-xs text-gray-600 mb-3">
+          Structural checks highlight overlap, gaps, and monotonicity issues in timing order.
+        </p>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <InfoCard
             label="Gap Ratio"
@@ -165,6 +208,9 @@ export function SentenceDetail() {
               config={{ displayModeBar: false }}
               className="w-full"
             />
+            <p className="text-xs text-gray-600 mt-2">
+              Word-by-word confidence trend. Sharp drops often coincide with unstable timing.
+            </p>
           </div>
 
           <div className="bg-white rounded shadow p-4">
@@ -199,6 +245,9 @@ export function SentenceDetail() {
               config={{ displayModeBar: false }}
               className="w-full"
             />
+            <p className="text-xs text-gray-600 mt-2">
+              Absolute start/end boundary errors per word in milliseconds.
+            </p>
           </div>
 
           <div className="bg-white rounded shadow overflow-x-auto">

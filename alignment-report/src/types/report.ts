@@ -55,6 +55,7 @@ export interface TimingMetrics {
   trimmed_mean_abs_err_ms: number;
   offset_ms: number;
   drift_ms_per_sec: number;
+  drift_delta_ms?: number;
 }
 
 export interface TimingStats {
@@ -99,10 +100,20 @@ export interface AggregateMetrics {
   abs_err_ms_median: StatsDistribution | null;
   abs_err_ms_p90: StatsDistribution | null;
   drift_ms_per_sec: StatsDistribution | null;
+  drift_delta_ms?: StatsDistribution | null;
   low_conf_word_ratio: StatsDistribution | null;
   avg_word_margin?: StatsDistribution | null;
   avg_boundary_confidence?: StatsDistribution | null;
   blank_frame_ratio: StatsDistribution | null;
+  abs_err_ms_p90_pass_rate?: ThresholdPassRates | null;
+  word_abs_err_ms?: StatsDistribution | null;
+  word_abs_err_pass_rate?: ThresholdPassRates | null;
+}
+
+export interface ThresholdPassRates {
+  le_50_ms: number;
+  le_100_ms: number;
+  le_150_ms: number;
 }
 
 export interface StatsDistribution {
