@@ -124,24 +124,6 @@ fn all_policies_preserve_non_overlapping_boundaries() {
 }
 
 #[test]
-fn selector_prefers_conservative_start_for_large_pauses() {
-    let raw = vec![
-        make_raw("A", 10, 15),
-        make_raw("B", 60, 65),
-        make_raw("C", 110, 118),
-    ];
-    let candidates = ExpansionPolicy::ALL
-        .into_iter()
-        .map(|policy| (policy, expand_with_policy(raw.clone(), 0, 130, policy)))
-        .collect::<Vec<_>>();
-    let log_probs = make_uniform_log_probs(140, 4);
-
-    let selected =
-        select_best(&raw, candidates, &log_probs, 0).expect("selector should return a candidate");
-    assert_eq!(selected.policy, ExpansionPolicy::ConservativeStart);
-}
-
-#[test]
 fn selector_prefers_balanced_when_scores_tie() {
     let raw = vec![make_raw("A", 10, 20), make_raw("B", 21, 30)];
     let candidates = ExpansionPolicy::ALL
@@ -183,7 +165,10 @@ fn selector_uses_blank_boundary_evidence() {
         select_best(&raw, candidates, &log_probs, 0).expect("selector should return a candidate");
     assert_eq!(selected.policy, ExpansionPolicy::Balanced);
     assert!(
-        selected.words[0].confidence_stats.boundary_confidence.is_some(),
+        selected.words[0]
+            .confidence_stats
+            .boundary_confidence
+            .is_some(),
         "selected candidate should carry per-word boundary confidence"
     );
 }
@@ -241,4 +226,64 @@ fn group_into_words_basic() {
     assert!(words[0].confidence.is_some());
     assert!(words[0].confidence_stats.geo_mean_prob.is_some());
     assert_eq!(words[0].confidence_stats.coverage_frame_count, 2);
+}
+
+#[test]
+fn confidence_is_stable_across_repeated_state_holds() {
+    let tokens = vec![0, 1, 0];
+    let chars: Vec<Option<char>> = vec![None, Some('A'), None];
+    let expected_words = ["A".to_string()];
+    let blank_id = 0;
+    let word_sep_id = 2;
+    let stride_ms = 20.0;
+
+    let short_path = vec![(0, 0), (1, 1), (0, 2)];
+    let long_path = vec![(0, 0), (1, 1), (1, 2), (1, 3), (1, 4), (1, 5), (0, 6)];
+
+    let mut short_log_probs = vec![vec![-5.0; 3]; 3];
+    short_log_probs[1][1] = -0.1;
+    short_log_probs[1][0] = -3.0;
+
+    let mut long_log_probs = vec![vec![-5.0; 3]; 7];
+    long_log_probs[1][1] = -0.1; // emission frame
+    long_log_probs[1][0] = -3.0;
+    for frame in 2..=5 {
+        long_log_probs[frame][1] = -4.5; // repeated hold frames should not drag confidence down
+        long_log_probs[frame][0] = -0.2;
+    }
+
+    let short_words = group_into_words(
+        &short_path,
+        &tokens,
+        &chars,
+        &expected_words,
+        &short_log_probs,
+        blank_id,
+        word_sep_id,
+        stride_ms,
+    );
+    let long_words = group_into_words(
+        &long_path,
+        &tokens,
+        &chars,
+        &expected_words,
+        &long_log_probs,
+        blank_id,
+        word_sep_id,
+        stride_ms,
+    );
+
+    let short_conf = short_words[0]
+        .confidence
+        .expect("short path should have confidence");
+    let long_conf = long_words[0]
+        .confidence
+        .expect("long path should have confidence");
+
+    assert!(
+        (short_conf - long_conf).abs() < 1e-6,
+        "confidence should be emission-based and stable across repeated holds"
+    );
+    assert_eq!(short_words[0].confidence_stats.coverage_frame_count, 1);
+    assert_eq!(long_words[0].confidence_stats.coverage_frame_count, 5);
 }

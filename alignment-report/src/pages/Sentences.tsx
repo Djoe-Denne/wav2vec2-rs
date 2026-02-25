@@ -83,7 +83,7 @@ export function Sentences() {
               <SortableHeader label="Split" sortKey="split" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />
               <SortableHeader label="Duration (ms)" sortKey="duration_ms" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />
               <SortableHeader label="Words" sortKey="word_count_pred" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />
-              <SortableHeader label="Confidence" sortKey="word_conf_mean" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Calib Conf" sortKey="word_conf_mean" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />
               <SortableHeader label="Low Conf %" sortKey="low_conf_word_ratio" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />
               <SortableHeader label="Abs Err Med" sortKey="abs_err_ms_median" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />
               <SortableHeader label="Abs Err P90" sortKey="abs_err_ms_p90" currentKey={sortKey} direction={sortDirection} onSort={handleSort} />

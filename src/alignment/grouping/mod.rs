@@ -43,62 +43,127 @@ pub fn group_into_words(
 
     let first_frame = path.first().map(|&(_, f)| f).unwrap_or(0);
     let last_frame = path.last().map(|&(_, f)| f).unwrap_or(0);
-    let candidates = blank_expansion::ExpansionPolicy::ALL
-        .into_iter()
-        .map(|policy| {
-            (
-                policy,
-                blank_expansion::expand_with_policy(raw.clone(), first_frame, last_frame, policy),
-            )
-        })
-        .collect::<Vec<_>>();
+    let mut candidates = Vec::with_capacity(blank_expansion::ExpansionPolicy::ALL.len());
+    for policy in blank_expansion::ExpansionPolicy::ALL {
+        candidates.push((
+            policy,
+            blank_expansion::expand_with_policy(raw.clone(), first_frame, last_frame, policy),
+        ));
+    }
 
-    let selected = candidate_selector::select_best(&raw, candidates, log_probs, blank_id);
-    let (selected_policy, score, expanded) = if let Some(chosen) = selected {
-        (chosen.policy, Some(chosen.score), chosen.words)
-    } else {
-        (
-            blank_expansion::ExpansionPolicy::Balanced,
-            None,
-            blank_expansion::expand(raw, first_frame, last_frame),
-        )
-    };
+    let (selected_policy, expanded, selected_score) =
+        match candidate_selector::select_best(&raw, candidates, log_probs, blank_id) {
+            Some(chosen) => (chosen.policy, chosen.words, Some(chosen.score)),
+            None => (
+                blank_expansion::ExpansionPolicy::Balanced,
+                blank_expansion::expand(raw, first_frame, last_frame),
+                None,
+            ),
+        };
 
-    if let Some(score) = score {
+    if let Some(score) = selected_score {
         tracing::debug!(
             selected_policy = selected_policy.as_str(),
             score_total = format!("{:.3}", score.total_score),
-            score_confidence = format!("{:.3}", score.confidence_term),
-            score_boundary_confidence = format!("{:.3}", score.boundary_confidence_term),
-            score_boundary_non_blank = format!("{:.3}", score.boundary_non_blank_term),
-            score_boundary_margin = format!("{:.3}", score.boundary_margin_term),
-            score_boundary_penalty = format!("{:.3}", score.boundary_shift_penalty),
-            score_pause_penalty = format!("{:.3}", score.pause_penalty),
+            score_blank_boundary = format!("{:.3}", score.boundary_confidence_term),
+            score_boundary_shift = format!("{:.3}", score.boundary_shift_penalty),
+            score_pause = format!("{:.3}", score.pause_penalty),
             "grouping: selected expansion policy"
         );
     }
 
     expanded
         .into_iter()
-        .map(|w| {
+        .map(|mut w| {
             // Timing contract: [start_ms, end_ms), start inclusive and end exclusive.
             let start_ms = (w.start_frame as f64 * stride_ms) as u64;
             let end_ms = ((w.end_frame + 1) as f64 * stride_ms) as u64;
+            let quality_confidence = quality_confidence_score(&w.confidence_stats);
+            let calibrated_confidence = quality_confidence.map(calibrate_quality_confidence);
+            w.confidence_stats.quality_confidence = quality_confidence;
+            w.confidence_stats.calibrated_confidence = calibrated_confidence;
             tracing::debug!(
                 word = w.word.as_str(),
                 start_frame = w.start_frame,
                 end_frame = w.end_frame,
                 start_ms,
                 end_ms,
+                quality_confidence = quality_confidence,
+                calibrated_confidence = calibrated_confidence,
                 "grouping: final word boundary (after blank expansion)"
             );
             WordTiming {
                 word: w.word,
                 start_ms,
                 end_ms,
-                confidence: w.confidence,
+                confidence: calibrated_confidence,
                 confidence_stats: w.confidence_stats,
             }
         })
         .collect()
+}
+
+fn quality_confidence_score(stats: &WordConfidenceStats) -> Option<f32> {
+    let geo = stats.geo_mean_prob? as f64;
+
+    // Deterministic confidence score: blend raw support with separability and boundary evidence.
+    let mut weighted_sum = 0.0f64;
+    let mut total_weight = 0.0f64;
+
+    weighted_sum += 0.40 * geo;
+    total_weight += 0.40;
+
+    if let Some(margin) = stats.mean_margin {
+        let margin_score = sigmoid((margin as f64 - 1.0) / 1.5);
+        weighted_sum += 0.30 * margin_score;
+        total_weight += 0.30;
+    }
+
+    if let Some(p10_logp) = stats.p10_logp {
+        let p10_prob = (p10_logp as f64).exp().clamp(0.0, 1.0);
+        weighted_sum += 0.20 * p10_prob;
+        total_weight += 0.20;
+    }
+
+    let boundary_score = stats.boundary_confidence.map(|v| v as f64).unwrap_or(0.5);
+    weighted_sum += 0.10 * boundary_score.clamp(0.0, 1.0);
+    total_weight += 0.10;
+
+    if total_weight <= 0.0 {
+        None
+    } else {
+        Some((weighted_sum / total_weight).clamp(0.0, 1.0) as f32)
+    }
+}
+
+fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+fn calibrate_quality_confidence(score: f32) -> f32 {
+    const KNOTS: &[(f64, f64)] = &[
+        (0.00, 0.02),
+        (0.20, 0.12),
+        (0.35, 0.28),
+        (0.50, 0.50),
+        (0.65, 0.72),
+        (0.80, 0.88),
+        (0.95, 0.97),
+        (1.00, 0.99),
+    ];
+
+    let x = (score as f64).clamp(0.0, 1.0);
+    for window in KNOTS.windows(2) {
+        let (x0, y0) = window[0];
+        let (x1, y1) = window[1];
+        if x <= x1 {
+            let t = if (x1 - x0).abs() < f64::EPSILON {
+                0.0
+            } else {
+                (x - x0) / (x1 - x0)
+            };
+            return (y0 + t * (y1 - y0)).clamp(0.0, 1.0) as f32;
+        }
+    }
+    0.99
 }

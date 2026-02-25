@@ -51,7 +51,7 @@ export function Filters() {
 
         <div>
           <label className="block text-sm font-medium mb-1">
-            Min Confidence: {filters.confidence_threshold.toFixed(2)}
+            Min Calibrated Confidence: {filters.confidence_threshold.toFixed(2)}
           </label>
           <input
             type="range"

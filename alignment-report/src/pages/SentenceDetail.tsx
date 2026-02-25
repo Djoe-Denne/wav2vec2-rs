@@ -77,14 +77,18 @@ export function SentenceDetail() {
 
       <div className="bg-white rounded shadow p-4">
         <h3 className="font-semibold mb-3">Confidence Metrics</h3>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <InfoCard
-            label="Mean Confidence"
+            label="Mean Calibrated Confidence"
             value={sentence.confidence.word_conf_mean.toFixed(3)}
           />
           <InfoCard
-            label="Min Confidence"
+            label="Min Calibrated Confidence"
             value={sentence.confidence.word_conf_min.toFixed(3)}
+          />
+          <InfoCard
+            label="Low-Conf Threshold"
+            value={(sentence.confidence.low_conf_threshold_used ?? 0.5).toFixed(2)}
           />
           <InfoCard
             label="Low Conf Ratio"
@@ -140,12 +144,12 @@ export function SentenceDetail() {
       {sentence.per_word && sentence.per_word.length > 0 && (
         <>
           <div className="bg-white rounded shadow p-4">
-            <h3 className="font-semibold mb-3">Word-Level Confidence</h3>
+            <h3 className="font-semibold mb-3">Word-Level Calibrated Confidence</h3>
             <Plot
               data={[
                 {
                   x: sentence.per_word.map((_, i) => i),
-                  y: sentence.per_word.map((w) => w.conf),
+                  y: sentence.per_word.map((w) => w.conf ?? 0),
                   type: 'scatter',
                   mode: 'lines+markers',
                   marker: { color: '#3b82f6' },
@@ -154,7 +158,7 @@ export function SentenceDetail() {
               ]}
               layout={{
                 xaxis: { title: 'Word Index' },
-                yaxis: { title: 'Confidence' },
+                yaxis: { title: 'Calibrated Confidence Score' },
                 margin: { l: 50, r: 20, t: 20, b: 50 },
                 height: 300,
               }}
@@ -202,7 +206,9 @@ export function SentenceDetail() {
               <thead className="bg-gray-50 border-b">
                 <tr>
                   <th className="px-4 py-2 text-left">Word</th>
-                  <th className="px-4 py-2 text-right">Confidence</th>
+                  <th className="px-4 py-2 text-right">Calib Conf</th>
+                  <th className="px-4 py-2 text-right">Quality Conf</th>
+                  <th className="px-4 py-2 text-right">Raw Geo Prob</th>
                   <th className="px-4 py-2 text-right">Start Err (ms)</th>
                   <th className="px-4 py-2 text-right">End Err (ms)</th>
                   <th className="px-4 py-2 text-right">Ref Start</th>
@@ -214,7 +220,15 @@ export function SentenceDetail() {
                   <tr key={i} className="border-b">
                     <td className="px-4 py-2 font-medium">{word.word}</td>
                     <td className="px-4 py-2 text-right">
-                      {word.conf.toFixed(3)}
+                      {word.conf == null ? 'N/A' : word.conf.toFixed(3)}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {word.quality_confidence == null
+                        ? 'N/A'
+                        : word.quality_confidence.toFixed(3)}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {word.geo_mean_prob == null ? 'N/A' : word.geo_mean_prob.toFixed(3)}
                     </td>
                     <td className="px-4 py-2 text-right">
                       {word.start_err_ms.toFixed(1)}

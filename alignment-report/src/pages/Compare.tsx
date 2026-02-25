@@ -90,7 +90,7 @@ export function Compare() {
                     format={(v) => v.toString()}
                   />
                   <CompareRow
-                    label="Avg Confidence"
+                    label="Avg Calibrated Confidence"
                     valueA={aggregatesA.confidence.word_conf_mean.mean}
                     valueB={aggregatesB.confidence.word_conf_mean.mean}
                     format={(v) => v.toFixed(3)}
@@ -144,7 +144,7 @@ export function Compare() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded shadow p-4">
-              <h3 className="font-semibold mb-2">Confidence Distribution Comparison</h3>
+              <h3 className="font-semibold mb-2">Calibrated Confidence Distribution Comparison</h3>
               <Plot
                 data={[
                   {
@@ -164,7 +164,7 @@ export function Compare() {
                 ]}
                 layout={{
                   barmode: 'overlay',
-                  xaxis: { title: 'Confidence' },
+                  xaxis: { title: 'Calibrated Confidence Score' },
                   yaxis: { title: 'Count' },
                   margin: { l: 50, r: 20, t: 20, b: 50 },
                   height: 300,

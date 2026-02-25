@@ -31,6 +31,7 @@ export interface StructuralMetrics {
   negative_duration_word_count: number;
   overlap_word_count: number;
   non_monotonic_word_count: number;
+  invalid_confidence_word_count: number;
   gap_ratio: number;
   overlap_ratio: number;
 }
@@ -38,6 +39,9 @@ export interface StructuralMetrics {
 export interface ConfidenceMetrics {
   word_conf_mean: number;
   word_conf_min: number;
+  low_conf_threshold_used?: number;
+  avg_word_margin?: number | null;
+  avg_boundary_confidence?: number | null;
   low_conf_word_ratio: number;
   blank_frame_ratio: number | null;
   token_entropy_mean: number | null;
@@ -68,7 +72,16 @@ export interface PerWord {
   pred_end_ms: number;
   start_err_ms: number;
   end_err_ms: number;
-  conf: number;
+  conf: number | null;
+  quality_confidence?: number | null;
+  calibrated_confidence?: number | null;
+  mean_logp?: number | null;
+  geo_mean_prob?: number | null;
+  min_logp?: number | null;
+  p10_logp?: number | null;
+  mean_margin?: number | null;
+  coverage_frame_count?: number;
+  boundary_confidence?: number | null;
 }
 
 export interface Aggregates {
@@ -87,6 +100,8 @@ export interface AggregateMetrics {
   abs_err_ms_p90: StatsDistribution | null;
   drift_ms_per_sec: StatsDistribution | null;
   low_conf_word_ratio: StatsDistribution | null;
+  avg_word_margin?: StatsDistribution | null;
+  avg_boundary_confidence?: StatsDistribution | null;
   blank_frame_ratio: StatsDistribution | null;
 }
 

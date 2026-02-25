@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import Plot from 'react-plotly.js';
 import { useReports } from '../context/ReportContext';
-import { filterSentences, computeAggregates, createHistogramBins } from '../lib/aggregate';
+import { filterSentences, computeAggregates } from '../lib/aggregate';
 
 export function Overview() {
   const { selectedReport, filters } = useReports();
@@ -34,6 +34,12 @@ export function Overview() {
 
   const confValues = filteredSentences.map((s) => s.confidence.word_conf_mean);
   const absErrMedianValues = filteredSentences.map((s) => s.timing.abs_err_ms_median);
+  const cleanSentences = filteredSentences.filter((s) => s.split === 'clean');
+  const otherSentences = filteredSentences.filter((s) => s.split === 'other');
+  const cleanConfValues = cleanSentences.map((s) => s.confidence.word_conf_mean);
+  const otherConfValues = otherSentences.map((s) => s.confidence.word_conf_mean);
+  const cleanAbsErrMedianValues = cleanSentences.map((s) => s.timing.abs_err_ms_median);
+  const otherAbsErrMedianValues = otherSentences.map((s) => s.timing.abs_err_ms_median);
 
   return (
     <div className="space-y-6">
@@ -70,7 +76,7 @@ export function Overview() {
             />
           ))}
           <MetricCard
-            title="Avg Confidence"
+            title="Avg Calibrated Confidence"
             value={aggregates.confidence.word_conf_mean.mean.toFixed(3)}
           />
           <MetricCard
@@ -98,18 +104,29 @@ export function Overview() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="bg-white p-4 rounded shadow">
-          <h3 className="font-semibold mb-2">Confidence Distribution</h3>
+          <h3 className="font-semibold mb-2">Calibrated Confidence Distribution</h3>
           <Plot
             data={[
               {
-                x: confValues,
+                x: cleanConfValues,
                 type: 'histogram',
+                name: 'clean',
                 nbinsx: 30,
                 marker: { color: '#3b82f6' },
+                opacity: 0.65,
+              },
+              {
+                x: otherConfValues,
+                type: 'histogram',
+                name: 'other',
+                nbinsx: 30,
+                marker: { color: '#f59e0b' },
+                opacity: 0.65,
               },
             ]}
             layout={{
-              xaxis: { title: 'Word Confidence Mean' },
+              barmode: 'overlay',
+              xaxis: { title: 'Word Calibrated Confidence Mean' },
               yaxis: { title: 'Count' },
               margin: { l: 50, r: 20, t: 20, b: 50 },
               height: 300,
@@ -124,13 +141,24 @@ export function Overview() {
           <Plot
             data={[
               {
-                x: absErrMedianValues,
+                x: cleanAbsErrMedianValues,
                 type: 'histogram',
+                name: 'clean',
                 nbinsx: 30,
                 marker: { color: '#10b981' },
+                opacity: 0.65,
+              },
+              {
+                x: otherAbsErrMedianValues,
+                type: 'histogram',
+                name: 'other',
+                nbinsx: 30,
+                marker: { color: '#ef4444' },
+                opacity: 0.65,
               },
             ]}
             layout={{
+              barmode: 'overlay',
               xaxis: { title: 'Abs Error Median (ms)' },
               yaxis: { title: 'Count' },
               margin: { l: 50, r: 20, t: 20, b: 50 },
@@ -142,7 +170,7 @@ export function Overview() {
         </div>
 
         <div className="bg-white p-4 rounded shadow">
-          <h3 className="font-semibold mb-2">Confidence vs Timing Error</h3>
+          <h3 className="font-semibold mb-2">Calibrated Confidence vs Timing Error</h3>
           <Plot
             data={[
               {
@@ -159,7 +187,7 @@ export function Overview() {
               },
             ]}
             layout={{
-              xaxis: { title: 'Word Confidence Mean' },
+              xaxis: { title: 'Word Calibrated Confidence Mean' },
               yaxis: { title: 'Abs Error Median (ms)' },
               margin: { l: 50, r: 20, t: 20, b: 50 },
               height: 300,

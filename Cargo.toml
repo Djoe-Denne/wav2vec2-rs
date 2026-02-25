@@ -15,11 +15,12 @@ chrono = { version = "0.4", optional = true }
 clap = { version = "4", features = ["derive", "env"], optional = true }
 claxon = { version = "0.4.3", optional = true }
 textgrid = { version = "0.1.0", optional = true }
+indicatif = { version = "0.17", optional = true }
 
 [features]
 default = []
 cuda = ["candle-core/cuda"]
-report-cli = ["dep:chrono", "dep:clap", "dep:claxon", "dep:textgrid"]
+report-cli = ["dep:chrono", "dep:clap", "dep:claxon", "dep:textgrid", "dep:indicatif"]
 
 [[bin]]
 name = "alignment_report"

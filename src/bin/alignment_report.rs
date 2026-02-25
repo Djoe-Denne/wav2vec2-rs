@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use clap::Parser;
 use claxon::FlacReader;
+use indicatif::{ProgressBar, ProgressStyle};
 use textgrid::{TextGrid, TierType};
 use wav2vec2_rs::{
     aggregate_reports, attach_outlier_traces, compute_sentence_report, infer_split, AlignmentInput,
@@ -26,7 +27,11 @@ struct Args {
         default_value = "models/wav2vec2-base-960h"
     )]
     model_dir: PathBuf,
-    #[arg(long, env = "WAV2VEC2_REPORT_DATASET_ROOT", default_value = "test-data")]
+    #[arg(
+        long,
+        env = "WAV2VEC2_REPORT_DATASET_ROOT",
+        default_value = "test-data"
+    )]
     dataset_root: PathBuf,
     #[arg(long, env = "WAV2VEC2_REPORT_CASES_FILE")]
     cases_file: Option<PathBuf>,
@@ -113,8 +118,18 @@ fn run() -> Result<(), String> {
     let mut predicted_by_id: HashMap<String, Vec<WordTiming>> = HashMap::with_capacity(cases.len());
     let mut references_by_id: HashMap<String, Vec<ReferenceWord>> =
         HashMap::with_capacity(cases.len());
+    let progress = ProgressBar::new(cases.len() as u64);
+    progress.set_style(
+        ProgressStyle::with_template(
+            "[{elapsed_precise}] [{wide_bar:.cyan/blue}] {pos}/{len} ({eta}) {msg}",
+        )
+        .unwrap_or_else(|_| ProgressStyle::default_bar())
+        .progress_chars("=>-"),
+    );
+    progress.set_message("starting...");
 
     for case in &cases {
+        progress.set_message(case.id.clone());
         let audio_file = dataset_root.join(&case.audio_path);
         require_path_exists(
             &audio_file,
@@ -149,7 +164,9 @@ fn run() -> Result<(), String> {
         predicted_by_id.insert(case.id.clone(), output.words);
         references_by_id.insert(case.id.clone(), case.reference_words.clone());
         sentence_reports.push(sentence);
+        progress.inc(1);
     }
+    progress.finish_with_message("alignment pass complete");
 
     let mut sentences = sentence_reports;
     let aggregates = aggregate_reports(&sentences);

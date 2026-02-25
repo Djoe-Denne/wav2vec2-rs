@@ -1,11 +1,8 @@
 use super::blank_expansion::ExpansionPolicy;
 use super::RawWord;
 
-const WEIGHT_CONFIDENCE_TERM: f64 = 0.75;
-const WEIGHT_BOUNDARY_CONFIDENCE: f64 = 3.4;
-const WEIGHT_BOUNDARY_MARGIN: f64 = 0.8;
-const WEIGHT_BOUNDARY_NON_BLANK: f64 = 2.8;
-const WEIGHT_BOUNDARY_SHIFT: f64 = 0.6;
+const WEIGHT_BOUNDARY_CONFIDENCE: f64 = 3.2;
+const WEIGHT_BOUNDARY_SHIFT: f64 = 0.8;
 const WEIGHT_PAUSE_PLAUSIBILITY: f64 = 1.3;
 const LARGE_GAP_THRESHOLD_FRAMES: isize = 8;
 const OVERLAP_PENALTY_PER_FRAME: f64 = 12.0;
@@ -13,10 +10,7 @@ const NEAR_COLLAPSE_PENALTY: f64 = 4.0;
 
 #[derive(Debug, Clone, Copy)]
 pub(super) struct ScoreBreakdown {
-    pub(super) confidence_term: f64,
     pub(super) boundary_confidence_term: f64,
-    pub(super) boundary_non_blank_term: f64,
-    pub(super) boundary_margin_term: f64,
     pub(super) boundary_shift_penalty: f64,
     pub(super) pause_penalty: f64,
     pub(super) total_score: f64,
@@ -80,10 +74,7 @@ fn score_candidate(
     if raw_words.is_empty() || raw_words.len() != candidate_words.len() {
         return (
             ScoreBreakdown {
-                confidence_term: 0.0,
                 boundary_confidence_term: 0.0,
-                boundary_non_blank_term: 0.0,
-                boundary_margin_term: 0.0,
                 boundary_shift_penalty: 1_000_000.0,
                 pause_penalty: 1_000_000.0,
                 total_score: -2_000_000.0,
@@ -93,18 +84,6 @@ fn score_candidate(
     }
 
     let n = raw_words.len() as f64;
-    let confidence_term = {
-        let mut sum = 0.0;
-        let mut count = 0usize;
-        for word in candidate_words {
-            if let Some(conf) = word.confidence {
-                sum += conf as f64;
-                count += 1;
-            }
-        }
-        if count == 0 { 0.0 } else { sum / count as f64 }
-    };
-
     let boundary_evidence =
         compute_boundary_evidence(raw_words, candidate_words, log_probs, blank_id);
 
@@ -145,19 +124,13 @@ fn score_candidate(
         pause_penalty /= gap_count as f64;
     }
 
-    let total_score = WEIGHT_CONFIDENCE_TERM * confidence_term
-        + WEIGHT_BOUNDARY_CONFIDENCE * boundary_evidence.mean_blank_prob
-        + WEIGHT_BOUNDARY_MARGIN * boundary_evidence.mean_margin
-        - WEIGHT_BOUNDARY_NON_BLANK * boundary_evidence.mean_non_blank_prob
+    let total_score = WEIGHT_BOUNDARY_CONFIDENCE * boundary_evidence.mean_blank_prob
         - WEIGHT_BOUNDARY_SHIFT * boundary_shift_penalty
         - WEIGHT_PAUSE_PLAUSIBILITY * pause_penalty;
 
     (
         ScoreBreakdown {
-            confidence_term,
             boundary_confidence_term: boundary_evidence.mean_blank_prob,
-            boundary_non_blank_term: boundary_evidence.mean_non_blank_prob,
-            boundary_margin_term: boundary_evidence.mean_margin,
             boundary_shift_penalty,
             pause_penalty,
             total_score,
@@ -169,8 +142,6 @@ fn score_candidate(
 #[derive(Default)]
 struct BoundaryEvidence {
     mean_blank_prob: f64,
-    mean_non_blank_prob: f64,
-    mean_margin: f64,
     per_word_blank_prob: Vec<Option<f32>>,
 }
 
@@ -185,8 +156,6 @@ fn compute_boundary_evidence(
     }
 
     let mut blank_sum = 0.0f64;
-    let mut non_blank_sum = 0.0f64;
-    let mut margin_sum = 0.0f64;
     let mut count = 0usize;
 
     let mut per_word_sum = vec![0.0f64; candidate_words.len()];
@@ -195,12 +164,8 @@ fn compute_boundary_evidence(
     for (idx, (raw, cand)) in raw_words.iter().zip(candidate_words.iter()).enumerate() {
         if cand.start_frame < raw.start_frame {
             for frame in cand.start_frame..raw.start_frame {
-                if let Some((blank_prob, non_blank_prob, margin)) =
-                    frame_boundary_stats(log_probs, frame, blank_id)
-                {
+                if let Some(blank_prob) = blank_prob_at_frame(log_probs, frame, blank_id) {
                     blank_sum += blank_prob;
-                    non_blank_sum += non_blank_prob;
-                    margin_sum += margin;
                     count += 1;
                     per_word_sum[idx] += blank_prob;
                     per_word_count[idx] += 1;
@@ -209,12 +174,8 @@ fn compute_boundary_evidence(
         }
         if cand.end_frame > raw.end_frame {
             for frame in (raw.end_frame + 1)..=cand.end_frame {
-                if let Some((blank_prob, non_blank_prob, margin)) =
-                    frame_boundary_stats(log_probs, frame, blank_id)
-                {
+                if let Some(blank_prob) = blank_prob_at_frame(log_probs, frame, blank_id) {
                     blank_sum += blank_prob;
-                    non_blank_sum += non_blank_prob;
-                    margin_sum += margin;
                     count += 1;
                     per_word_sum[idx] += blank_prob;
                     per_word_count[idx] += 1;
@@ -226,54 +187,30 @@ fn compute_boundary_evidence(
     let per_word_blank_prob = per_word_sum
         .into_iter()
         .zip(per_word_count)
-        .map(|(sum, c)| if c == 0 { None } else { Some((sum / c as f64) as f32) })
+        .map(|(sum, c)| {
+            if c == 0 {
+                None
+            } else {
+                Some((sum / c as f64) as f32)
+            }
+        })
         .collect::<Vec<_>>();
 
     if count == 0 {
         return BoundaryEvidence {
             mean_blank_prob: 0.0,
-            mean_non_blank_prob: 0.0,
-            mean_margin: 0.0,
             per_word_blank_prob,
         };
     }
 
     BoundaryEvidence {
         mean_blank_prob: blank_sum / count as f64,
-        mean_non_blank_prob: non_blank_sum / count as f64,
-        mean_margin: margin_sum / count as f64,
         per_word_blank_prob,
     }
 }
 
-fn frame_boundary_stats(
-    log_probs: &[Vec<f32>],
-    frame: usize,
-    blank_id: usize,
-) -> Option<(f64, f64, f64)> {
+fn blank_prob_at_frame(log_probs: &[Vec<f32>], frame: usize, blank_id: usize) -> Option<f64> {
     let row = log_probs.get(frame)?;
     let &blank_logp = row.get(blank_id)?;
-
-    let mut best_non_blank = f32::NEG_INFINITY;
-    for (tid, &value) in row.iter().enumerate() {
-        if tid == blank_id {
-            continue;
-        }
-        if value > best_non_blank {
-            best_non_blank = value;
-        }
-    }
-
-    let blank_prob = blank_logp.exp() as f64;
-    let non_blank_prob = if best_non_blank.is_finite() {
-        best_non_blank.exp() as f64
-    } else {
-        0.0
-    };
-    let local_margin = if best_non_blank.is_finite() {
-        (blank_logp - best_non_blank) as f64
-    } else {
-        0.0
-    };
-    Some((blank_prob, non_blank_prob, local_margin))
+    Some(blank_logp.exp() as f64)
 }

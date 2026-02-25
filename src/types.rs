@@ -12,8 +12,9 @@ pub struct WordTiming {
     pub start_ms: u64,
     /// Millisecond interval is [start_ms, end_ms), i.e. start inclusive/end exclusive.
     pub end_ms: u64,
-    /// Legacy confidence field, equal to `confidence_stats.geo_mean_prob`.
-    /// `None` means confidence could not be computed from any covered frames.
+    /// Deterministic word-level quality confidence score in [0, 1].
+    /// This blends acoustic support (`geo_mean_prob`) with separability and
+    /// boundary evidence. `None` means confidence could not be computed.
     pub confidence: Option<f32>,
     pub confidence_stats: WordConfidenceStats,
 }
@@ -22,6 +23,10 @@ pub struct WordTiming {
 pub struct WordConfidenceStats {
     pub mean_logp: Option<f32>,
     pub geo_mean_prob: Option<f32>,
+    /// Deterministic composite quality score before calibration.
+    pub quality_confidence: Option<f32>,
+    /// Monotonic calibrated confidence score in [0, 1].
+    pub calibrated_confidence: Option<f32>,
     pub min_logp: Option<f32>,
     pub p10_logp: Option<f32>,
     pub mean_margin: Option<f32>,

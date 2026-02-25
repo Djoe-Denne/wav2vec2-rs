@@ -18,14 +18,21 @@ fn flush_word(
     cur_word: &mut String,
     start_frame: &mut Option<usize>,
     end_frame: usize,
-    lp_accum: &mut Vec<f32>,
-    margin_accum: &mut Vec<f32>,
+    emission_lp_accum: &mut Vec<f32>,
+    emission_margin_accum: &mut Vec<f32>,
+    coverage_frame_count: &mut usize,
     out: &mut Vec<RawWord>,
 ) {
     if cur_word.is_empty() {
         return;
     }
-    let confidence_stats = build_confidence_stats(lp_accum, margin_accum);
+    let confidence_stats = build_confidence_stats(
+        emission_lp_accum,
+        emission_margin_accum,
+        *coverage_frame_count,
+    );
+    // Raw acoustic support retained for boundary scoring; final word confidence
+    // score is derived later from full confidence_stats.
     let confidence = confidence_stats.geo_mean_prob;
     if confidence.is_none() {
         tracing::warn!(
@@ -44,8 +51,9 @@ fn flush_word(
     });
     cur_word.clear();
     *start_frame = None;
-    lp_accum.clear();
-    margin_accum.clear();
+    emission_lp_accum.clear();
+    emission_margin_accum.clear();
+    *coverage_frame_count = 0;
 }
 
 /// Phase 1: Walk the Viterbi path and group character frames into words.
@@ -64,8 +72,9 @@ pub(super) fn collect(
     let mut cur_word = String::new();
     let mut start_frame: Option<usize> = None;
     let mut end_frame: usize = 0;
-    let mut lp_accum = Vec::new();
-    let mut margin_accum = Vec::new();
+    let mut emission_lp_accum = Vec::new();
+    let mut emission_margin_accum = Vec::new();
+    let mut coverage_frame_count = 0usize;
     let mut prev_state: Option<usize> = None;
 
     let words_from_chars = reconstruct_words_from_chars(chars);
@@ -113,8 +122,9 @@ pub(super) fn collect(
                 &mut cur_word,
                 &mut start_frame,
                 end_frame,
-                &mut lp_accum,
-                &mut margin_accum,
+                &mut emission_lp_accum,
+                &mut emission_margin_accum,
+                &mut coverage_frame_count,
                 &mut words,
             );
             prev_state = Some(s);
@@ -126,9 +136,11 @@ pub(super) fn collect(
                 start_frame = Some(frame);
             }
             end_frame = frame;
-            lp_accum.push(log_probs[frame][tid]);
-            margin_accum.push(top2_margin_logp(&log_probs[frame]));
+            coverage_frame_count += 1;
             if is_new_state {
+                // Confidence uses emission events (state changes), not repeated holds.
+                emission_lp_accum.push(log_probs[frame][tid]);
+                emission_margin_accum.push(top2_margin_logp(&log_probs[frame]));
                 cur_word.push(c);
             }
             tracing::debug!(
@@ -151,8 +163,9 @@ pub(super) fn collect(
         &mut cur_word,
         &mut start_frame,
         end_frame,
-        &mut lp_accum,
-        &mut margin_accum,
+        &mut emission_lp_accum,
+        &mut emission_margin_accum,
+        &mut coverage_frame_count,
         &mut words,
     );
     words
@@ -195,33 +208,39 @@ fn top2_margin_logp(row: &[f32]) -> f32 {
     }
 }
 
-fn build_confidence_stats(lp_accum: &[f32], margin_accum: &[f32]) -> WordConfidenceStats {
-    if lp_accum.is_empty() {
+fn build_confidence_stats(
+    emission_lp_accum: &[f32],
+    emission_margin_accum: &[f32],
+    coverage_frame_count: usize,
+) -> WordConfidenceStats {
+    if emission_lp_accum.is_empty() {
         return WordConfidenceStats {
-            coverage_frame_count: 0,
+            coverage_frame_count: coverage_frame_count as u32,
             ..WordConfidenceStats::default()
         };
     }
 
-    let mut sorted = lp_accum.to_vec();
+    let mut sorted = emission_lp_accum.to_vec();
     sorted.sort_by(|a, b| a.total_cmp(b));
-    let mean_logp = lp_accum.iter().sum::<f32>() / lp_accum.len() as f32;
+    let mean_logp = emission_lp_accum.iter().sum::<f32>() / emission_lp_accum.len() as f32;
     let min_logp = sorted[0];
     let p10_logp = percentile_sorted(&sorted, 0.10);
-    let mean_margin = if margin_accum.is_empty() {
+    let mean_margin = if emission_margin_accum.is_empty() {
         None
     } else {
-        Some(margin_accum.iter().sum::<f32>() / margin_accum.len() as f32)
+        Some(emission_margin_accum.iter().sum::<f32>() / emission_margin_accum.len() as f32)
     };
     let geo_mean_prob = Some(((mean_logp as f64).exp().max(f32::MIN_POSITIVE as f64)) as f32);
 
     WordConfidenceStats {
         mean_logp: Some(mean_logp),
         geo_mean_prob,
+        quality_confidence: None,
+        calibrated_confidence: None,
         min_logp: Some(min_logp),
         p10_logp: Some(p10_logp),
         mean_margin,
-        coverage_frame_count: lp_accum.len() as u32,
+        coverage_frame_count: coverage_frame_count as u32,
         boundary_confidence: None,
     }
 }
