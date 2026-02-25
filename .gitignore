@@ -18,3 +18,7 @@ tests/test_settings.json
 test-data/
 
 .venv/
+
+.env
+.bolt
+node_modules/

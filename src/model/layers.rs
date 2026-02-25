@@ -20,7 +20,9 @@ impl LayerNorm {
         let centered = x.broadcast_sub(&mean)?;
         let var = (centered.sqr()?.sum_keepdim(D::Minus1)? / hidden)?;
         let normed = centered.broadcast_div(&(var + self.eps)?.sqrt()?)?;
-        normed.broadcast_mul(&self.weight)?.broadcast_add(&self.bias)
+        normed
+            .broadcast_mul(&self.weight)?
+            .broadcast_add(&self.bias)
     }
 }
 
@@ -70,7 +72,11 @@ impl GroupNorm1d {
         let grouped = x.reshape((b, self.num_groups, channels_per_group, t))?;
         let mean = (grouped.sum_keepdim(D::Minus1)?.sum_keepdim(D::Minus2)? / denom)?;
         let centered = grouped.broadcast_sub(&mean)?;
-        let var = (centered.sqr()?.sum_keepdim(D::Minus1)?.sum_keepdim(D::Minus2)? / denom)?;
+        let var = (centered
+            .sqr()?
+            .sum_keepdim(D::Minus1)?
+            .sum_keepdim(D::Minus2)?
+            / denom)?;
         let normed = centered.broadcast_div(&(var + self.eps)?.sqrt()?)?;
         let normed = normed.reshape((b, c, t))?;
 

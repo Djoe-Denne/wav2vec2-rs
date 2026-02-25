@@ -11,17 +11,17 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "1.0"
 tracing = "0.1"
+chrono = { version = "0.4", optional = true }
+clap = { version = "4", features = ["derive", "env"], optional = true }
+claxon = { version = "0.4.3", optional = true }
+textgrid = { version = "0.1.0", optional = true }
 
 [features]
 default = []
 cuda = ["candle-core/cuda"]
+report-cli = ["dep:chrono", "dep:clap", "dep:claxon", "dep:textgrid"]
 
-[dev-dependencies]
-claxon = "0.4.3"
-libtest-mimic = "0.8.1"
-rand = "0.9.2"
-
-[[test]]
-name = "alignment_reference"
-path = "tests/alignment_reference.rs"
-harness = false
+[[bin]]
+name = "alignment_report"
+path = "src/bin/alignment_report.rs"
+required-features = ["report-cli"]

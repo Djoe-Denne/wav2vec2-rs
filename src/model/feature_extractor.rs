@@ -56,7 +56,9 @@ impl ConvLayer {
             gn.forward(&xs)?
         } else if let Some(ln) = &self.layer_norm {
             // LayerNorm path normalizes over channels for each time step.
-            ln.forward(&xs.transpose(1, 2)?)?.transpose(1, 2)?.contiguous()?
+            ln.forward(&xs.transpose(1, 2)?)?
+                .transpose(1, 2)?
+                .contiguous()?
         } else {
             xs
         };

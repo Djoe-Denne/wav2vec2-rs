@@ -30,7 +30,10 @@ impl PosConvEmbed {
     fn forward(&self, xs: &Tensor) -> candle_core::Result<Tensor> {
         let seq_len = xs.dim(1)?;
         let h = self.conv.forward(&xs.transpose(1, 2)?.contiguous()?)?;
-        h.narrow(2, 0, seq_len)?.gelu()?.transpose(1, 2)?.contiguous()
+        h.narrow(2, 0, seq_len)?
+            .gelu()?
+            .transpose(1, 2)?
+            .contiguous()
     }
 }
 
@@ -70,15 +73,13 @@ impl SelfAttention {
         let k = reshape(self.k.forward(xs)?)?;
         let v = reshape(self.v.forward(xs)?)?;
 
-        let attn = candle_nn::ops::softmax(
-            &q.matmul(&k.transpose(2, 3)?.contiguous()?)?,
-            D::Minus1,
-        )?;
-        let out = attn
-            .matmul(&v)?
-            .transpose(1, 2)?
-            .contiguous()?
-            .reshape((b, t, self.num_heads * self.head_dim))?;
+        let attn =
+            candle_nn::ops::softmax(&q.matmul(&k.transpose(2, 3)?.contiguous()?)?, D::Minus1)?;
+        let out = attn.matmul(&v)?.transpose(1, 2)?.contiguous()?.reshape((
+            b,
+            t,
+            self.num_heads * self.head_dim,
+        ))?;
         self.out.forward(&out)
     }
 }
@@ -163,11 +164,7 @@ impl Encoder {
         }
         Ok(Self {
             pos_conv: PosConvEmbed::load(cfg, vb.pp("pos_conv_embed"))?,
-            layer_norm: layer_norm(
-                cfg.hidden_size,
-                cfg.layer_norm_eps,
-                vb.pp("layer_norm"),
-            )?,
+            layer_norm: layer_norm(cfg.hidden_size, cfg.layer_norm_eps, vb.pp("layer_norm"))?,
             layers,
         })
     }

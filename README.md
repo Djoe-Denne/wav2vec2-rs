@@ -182,38 +182,107 @@ Use a different local model directory:
 python scripts/pytorch_aligner.py --model-dir models/wav2vec2-base-960h
 ```
 
-## Integration Timestamp Tests
+## Alignment Metrics Report (CLI)
 
-Integration tests compare Rust-generated word timestamps against the PyTorch
-reference JSON under `test-data/alignments`.
+The threshold-based integration test is replaced by a deterministic report
+generator.
 
-Required local files:
+The report command does **not** fail based on timing quality. It only fails on:
+
+- I/O or parsing failures
+- inference/runtime failures
+- invalid numeric metrics (NaN / Inf)
+
+### Build and run
+
+```bash
+cargo run --features report-cli --bin alignment_report -- --help
+```
+
+Basic run:
+
+```bash
+cargo run --features report-cli --bin alignment_report -- \
+  --dataset-root test-data \
+  --out target/alignment_reports/run.json
+```
+
+Run a filtered subset from a case-id file:
+
+```bash
+cargo run --features report-cli --bin alignment_report -- \
+  --cases-file current-failing-tests.txt \
+  --offset 0 \
+  --limit 200 \
+  --out target/alignment_reports/failing-cases.json
+```
+
+### Required local files
 
 - `models/wav2vec2-base-960h/model.safetensors`
 - `models/wav2vec2-base-960h/config.json`
 - `models/wav2vec2-base-960h/vocab.json`
-- audio files referenced by `test-data/alignments/*.json`
+- `test-data/LibriSpeech/test-clean/**` and/or `test-data/LibriSpeech/test-other/**`
+- TextGrid + sibling FLAC files (the CLI scans for `*.TextGrid` and uses
+  matching `.flac`)
 
-Default run (deterministic random sample of 50 utterances):
+### CLI options
+
+- `--model-dir <PATH>`: model directory (default: `models/wav2vec2-base-960h`)
+- `--dataset-root <PATH>`: dataset root (default: `test-data`)
+- `--cases-file <PATH>`: optional case list file
+- `--out <PATH>`: output JSON path (default:
+  `target/alignment_reports/alignment-report-<timestamp>.json`)
+- `--limit <N>`: max selected cases
+- `--offset <N>`: skip first N selected cases
+- `--device <cpu|cuda>`: runtime device (default: `cpu`)
+
+### Environment variables (optional)
+
+Each CLI option can be configured through an environment variable:
+
+- `WAV2VEC2_REPORT_MODEL_DIR` -> `--model-dir`
+- `WAV2VEC2_REPORT_DATASET_ROOT` -> `--dataset-root`
+- `WAV2VEC2_REPORT_CASES_FILE` -> `--cases-file`
+- `WAV2VEC2_REPORT_OUT` -> `--out`
+- `WAV2VEC2_REPORT_LIMIT` -> `--limit`
+- `WAV2VEC2_REPORT_OFFSET` -> `--offset`
+- `WAV2VEC2_REPORT_DEVICE` -> `--device`
+
+Command-line flags take precedence over environment variables.
+
+Example (Bash):
 
 ```bash
-cargo test pytorch_alignment_reference_matches_within_delta -- --nocapture
+WAV2VEC2_REPORT_CASES_FILE=current-failing-tests.txt \
+WAV2VEC2_REPORT_DEVICE=cpu \
+cargo run --features report-cli --bin alignment_report -- --out target/alignment_reports/env-run.json
 ```
 
-Full run (all utterances from `test-clean` + `test-other`):
+Example (PowerShell):
 
-```bash
-WAV2VEC2_IT_FULL=1 cargo test pytorch_alignment_reference_matches_within_delta -- --nocapture
+```powershell
+$env:WAV2VEC2_REPORT_CASES_FILE = "current-failing-tests.txt"
+$env:WAV2VEC2_REPORT_DEVICE = "cpu"
+cargo run --features report-cli --bin alignment_report -- --out target/alignment_reports/env-run.json
 ```
 
-Override average timestamp tolerance (milliseconds):
+### Case file format
 
-```bash
-WAV2VEC2_IT_DELTA_MS=30 cargo test pytorch_alignment_reference_matches_within_delta -- --nocapture
-```
+`--cases-file` accepts one ID per line (e.g. `1089-134686-0000`). It also
+tolerates:
 
-Optional overrides:
+- lines prefixed like `L123:<id>`
+- test-name lines containing `::audio::<id>`
+- comments starting with `#`
 
-- `WAV2VEC2_IT_MODEL_DIR=/absolute/or/relative/model/dir`
-- `WAV2VEC2_IT_SEED=123` (sample seed for default 50 mode)
-- `WAV2VEC2_IT_DEVICE=cpu|cuda`
+### Report output
+
+The generated JSON includes:
+
+- `schema_version = 1`
+- `meta` (`generated_at`, `model_path`, `device`, `frame_stride_ms`,
+  `case_count`)
+- `sentences[]` with per-utterance metrics and `split = clean|other|unknown`
+- `aggregates` with global/per-split distributions and deterministic outlier
+  ranking

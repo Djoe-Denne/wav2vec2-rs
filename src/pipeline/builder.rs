@@ -65,8 +65,8 @@ impl ForcedAlignerBuilder {
             .map_err(|e| AlignmentError::io("read safetensors", e))?;
         let vb = VarBuilder::from_buffered_safetensors(model_data, DType::F32, &device)
             .map_err(|e| AlignmentError::runtime("load safetensors", e))?;
-        let model =
-            Wav2Vec2ForCTC::load(&model_cfg, vb).map_err(|e| AlignmentError::runtime("build model", e))?;
+        let model = Wav2Vec2ForCTC::load(&model_cfg, vb)
+            .map_err(|e| AlignmentError::runtime("build model", e))?;
 
         tracing::info!(
             hidden_size = model_cfg.hidden_size,
@@ -100,7 +100,8 @@ impl ForcedAlignerBuilder {
 }
 
 fn load_vocab(path: &Path) -> Result<HashMap<char, usize>, AlignmentError> {
-    let data = std::fs::read_to_string(path).map_err(|e| AlignmentError::io("read vocab.json", e))?;
+    let data =
+        std::fs::read_to_string(path).map_err(|e| AlignmentError::io("read vocab.json", e))?;
     let raw: HashMap<String, usize> =
         serde_json::from_str(&data).map_err(|e| AlignmentError::json("parse vocab.json", e))?;
 

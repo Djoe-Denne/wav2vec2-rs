@@ -2,12 +2,11 @@ use std::collections::HashMap;
 
 use candle_core::{Device, Tensor, D};
 
+use crate::alignment::audio_boundaries::{detect_audio_offset_frame, detect_audio_onset_frame};
 use crate::error::AlignmentError;
 use crate::model::ctc_model::Wav2Vec2ForCTC;
 use crate::pipeline::traits::{SequenceAligner, Tokenizer, WordGrouper};
 use crate::types::{AlignmentInput, AlignmentOutput};
-
-const ONSET_MIN_CONSEC_FRAMES: usize = 3;
 
 pub struct ForcedAligner {
     model: Wav2Vec2ForCTC,
@@ -81,9 +80,12 @@ impl ForcedAligner {
             .to_vec2()
             .map_err(|e| AlignmentError::runtime("to_vec2", e))?;
 
-        let token_sequence =
-            self.tokenizer
-                .tokenize(&input.transcript, &self.vocab, self.blank_id, self.word_sep_id);
+        let token_sequence = self.tokenizer.tokenize(
+            &input.transcript,
+            &self.vocab,
+            self.blank_id,
+            self.word_sep_id,
+        );
 
         if token_sequence.tokens.is_empty() {
             return Ok(AlignmentOutput { words: Vec::new() });
@@ -112,59 +114,42 @@ impl ForcedAligner {
         if let Some(onset_frame) =
             detect_audio_onset_frame(&input.samples, input.sample_rate_hz, self.frame_stride_ms)
         {
-            if let Some(first_word) = words.first() {
+            if let Some(first_word) = words.first_mut() {
                 let onset_ms = (onset_frame as f64 * self.frame_stride_ms) as u64;
-                let shift_ms = onset_ms.saturating_sub(first_word.start_ms);
-                if shift_ms > 0 {
-                    for w in &mut words {
-                        w.start_ms += shift_ms;
-                        w.end_ms += shift_ms;
-                    }
+                tracing::debug!(
+                    onset_frame,
+                    onset_ms,
+                    first_word_start_ms = first_word.start_ms,
+                    "onset detection: adjusting first word start"
+                );
+                if onset_ms < first_word.start_ms {
+                    first_word.start_ms = onset_ms;
+                }
+            }
+        }
+        if let Some(offset_frame) =
+            detect_audio_offset_frame(&input.samples, input.sample_rate_hz, self.frame_stride_ms)
+        {
+            if let Some(last_word) = words.last_mut() {
+                let offset_ms =
+                    ((offset_frame.saturating_add(1)) as f64 * self.frame_stride_ms) as u64;
+                tracing::debug!(
+                    offset_frame,
+                    offset_ms,
+                    last_word_end_ms = last_word.end_ms,
+                    "offset detection: adjusting last word end"
+                );
+                if offset_ms > last_word.end_ms {
+                    last_word.end_ms = offset_ms;
                 }
             }
         }
         Ok(AlignmentOutput { words })
     }
-}
 
-fn detect_audio_onset_frame(samples: &[f32], sample_rate_hz: u32, frame_stride_ms: f64) -> Option<usize> {
-    if samples.is_empty() || sample_rate_hz == 0 {
-        return None;
+    pub fn frame_stride_ms(&self) -> f64 {
+        self.frame_stride_ms
     }
-    let frame_len = ((sample_rate_hz as f64 * frame_stride_ms) / 1000.0).round() as usize;
-    let frame_len = frame_len.max(1);
-
-    let mut frame_rms = Vec::new();
-    for chunk in samples.chunks(frame_len) {
-        let mean_sq = chunk.iter().map(|&x| (x as f64) * (x as f64)).sum::<f64>() / chunk.len() as f64;
-        frame_rms.push(mean_sq.sqrt() as f32);
-    }
-    if frame_rms.is_empty() {
-        return None;
-    }
-
-    let baseline_frames = frame_rms.len().min(10);
-    let noise_floor =
-        frame_rms.iter().take(baseline_frames).copied().sum::<f32>() / baseline_frames as f32;
-    let threshold = (noise_floor * 4.0).max(0.01);
-
-    let mut run_start = 0usize;
-    let mut run_len = 0usize;
-    for (frame_idx, rms) in frame_rms.iter().copied().enumerate() {
-        if rms >= threshold {
-            if run_len == 0 {
-                run_start = frame_idx;
-            }
-            run_len += 1;
-            if run_len >= ONSET_MIN_CONSEC_FRAMES {
-                return Some(run_start);
-            }
-            continue;
-        }
-        run_len = 0;
-    }
-
-    None
 }
 
 fn normalize_audio(samples: &[f32]) -> Vec<f32> {

@@ -49,6 +49,7 @@ impl WordGrouper for DefaultWordGrouper {
             path,
             &token_sequence.tokens,
             &token_sequence.chars,
+            &token_sequence.normalized_words,
             log_probs,
             blank_id,
             word_sep_id,

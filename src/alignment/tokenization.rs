@@ -26,21 +26,66 @@ pub fn build_token_sequence_case_aware(
 
     let mut tokens = vec![blank_id];
     let mut chars: Vec<Option<char>> = vec![None];
-    for (wi, word) in cleaned.split_whitespace().enumerate() {
-        if wi > 0 {
+    let mut normalized_words = Vec::new();
+
+    for word in cleaned.split_whitespace() {
+        let mut emitted: Vec<(char, usize)> = Vec::new();
+        let mut normalized_word = String::new();
+        for c in word.chars() {
+            if let Some(&id) = vocab.get(&c) {
+                emitted.push((c, id));
+                normalized_word.push(c);
+            }
+        }
+
+        if emitted.is_empty() {
+            continue;
+        }
+
+        if !normalized_words.is_empty() {
             tokens.push(word_sep_id);
             chars.push(Some('|'));
             tokens.push(blank_id);
             chars.push(None);
         }
-        for c in word.chars() {
-            if let Some(&id) = vocab.get(&c) {
-                tokens.push(id);
-                chars.push(Some(c));
-                tokens.push(blank_id);
-                chars.push(None);
-            }
+
+        for (c, id) in emitted {
+            tokens.push(id);
+            chars.push(Some(c));
+            tokens.push(blank_id);
+            chars.push(None);
         }
+        normalized_words.push(normalized_word);
     }
-    TokenSequence { tokens, chars }
+
+    debug_assert_eq!(
+        normalized_words,
+        rebuild_words_from_chars(&chars),
+        "tokenization normalization contract violated"
+    );
+
+    TokenSequence {
+        tokens,
+        chars,
+        normalized_words,
+    }
+}
+
+fn rebuild_words_from_chars(chars: &[Option<char>]) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    for c in chars.iter().copied().flatten() {
+        if c == '|' {
+            if !cur.is_empty() {
+                words.push(cur.clone());
+                cur.clear();
+            }
+            continue;
+        }
+        cur.push(c);
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    words
 }
