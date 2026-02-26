@@ -22,6 +22,35 @@ let config = Wav2Vec2Config {
 let aligner = ForcedAlignerBuilder::new(config).build()?;
 ```
 
+### Switch runtime backend
+
+`ForcedAlignerBuilder` defaults to the Candle runtime. You can switch to ONNX Runtime
+through the builder:
+
+```rust
+use wav2vec2_rs::{ForcedAlignerBuilder, RuntimeKind, Wav2Vec2Config};
+
+let config = Wav2Vec2Config {
+    model_path: "models/wav2vec2-base-960h/model.onnx".into(),
+    config_path: "models/wav2vec2-base-960h/config.json".into(),
+    vocab_path: "models/wav2vec2-base-960h/vocab.json".into(),
+    device: "cuda".into(), // "cpu" and "cuda" are supported
+    expected_sample_rate_hz: Wav2Vec2Config::DEFAULT_SAMPLE_RATE_HZ,
+};
+
+let aligner = ForcedAlignerBuilder::new(config)
+    .with_runtime_kind(RuntimeKind::Onnx)
+    .build()?;
+```
+
+Notes:
+
+- ONNX support is behind the `onnx` feature: build with `--features onnx`.
+- Candle keeps working as before (and remains the default path).
+- `model_path` points to runtime-specific weights:
+  - Candle: `model.safetensors`
+  - ONNX: `model.onnx`
+
 ### Add custom pipeline components
 
 You can replace any pipeline brick by implementing one of the public traits:
@@ -182,6 +211,231 @@ Use a different local model directory:
 python scripts/pytorch_aligner.py --model-dir models/wav2vec2-base-960h
 ```
 
+### 4) Generate LibriSpeech TextGrid files in batch (wav2vec2aligner)
+
+Create and activate a virtual environment (Bash):
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+```
+
+Create and activate a virtual environment (PowerShell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+```
+
+Install CUDA-enabled PyTorch + script dependencies (Bash, pick one):
+
+```bash
+# CUDA 12.8
+pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+
+# CUDA 13.0
+# pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple
+```
+
+Install CUDA-enabled PyTorch + script dependencies (PowerShell, pick one):
+
+```powershell
+# CUDA 12.8
+pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+
+# CUDA 13.0
+# pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple
+```
+
+Install the local aligner package (Bash / PowerShell):
+
+```bash
+pip install -e wav2vec2aligner-main
+```
+
+```powershell
+pip install -e wav2vec2aligner-main
+```
+
+Clean existing TextGrid files before regeneration (Bash):
+
+```bash
+find test-data/LibriSpeech -type f -name "*.TextGrid" -delete
+```
+
+Clean existing TextGrid files before regeneration (PowerShell):
+
+```powershell
+Get-ChildItem .\test-data\LibriSpeech -Recurse -Filter *.TextGrid | Remove-Item -Force
+```
+
+Run batch TextGrid generation (Bash; model loads once, outputs overwrite existing `.TextGrid` files):
+
+```bash
+python scripts/wav2vec2aligner_librispeech_textgrids.py \
+  --dataset-root test-data/LibriSpeech \
+  --subsets test-clean,test-other \
+  --device cuda \
+  --overwrite
+```
+
+Run batch TextGrid generation (PowerShell; model loads once, outputs overwrite existing `.TextGrid` files):
+
+```powershell
+python .\scripts\wav2vec2aligner_librispeech_textgrids.py `
+  --dataset-root .\test-data\LibriSpeech `
+  --subsets test-clean,test-other `
+  --device cuda `
+  --overwrite
+```
+
+Quick smoke run (Bash):
+
+```bash
+python scripts/wav2vec2aligner_librispeech_textgrids.py \
+  --dataset-root test-data/LibriSpeech \
+  --subsets test-clean \
+  --limit 5 \
+  --progress-every 1 \
+  --device cuda \
+  --overwrite
+```
+
+Quick smoke run (PowerShell):
+
+```powershell
+python .\scripts\wav2vec2aligner_librispeech_textgrids.py `
+  --dataset-root .\test-data\LibriSpeech `
+  --subsets test-clean `
+  --limit 5 `
+  --progress-every 1 `
+  --device cuda `
+  --overwrite
+```
+
+### CUDA launch quick reference (script + bin)
+
+Python script (Bash):
+
+```bash
+python scripts/wav2vec2aligner_librispeech_textgrids.py \
+  --dataset-root test-data/LibriSpeech \
+  --subsets test-clean,test-other \
+  --device cuda \
+  --overwrite
+```
+
+Python script (PowerShell):
+
+```powershell
+python .\scripts\wav2vec2aligner_librispeech_textgrids.py `
+  --dataset-root .\test-data\LibriSpeech `
+  --subsets test-clean,test-other `
+  --device cuda `
+  --overwrite
+```
+
+Rust bin (`alignment_report`) TextGrid mode on CUDA (Bash):
+
+```bash
+cargo run --features "report-cli,cuda" --bin alignment_report -- \
+  --dataset-root test-data \
+  --output-format textgrid \
+  --textgrid-suffix _cmp \
+  --device cuda
+```
+
+Rust bin (`alignment_report`) TextGrid mode on CUDA (PowerShell):
+
+```powershell
+cargo run --features "report-cli,cuda" --bin alignment_report -- `
+  --dataset-root .\test-data `
+  --output-format textgrid `
+  --textgrid-suffix _cmp `
+  --device cuda
+```
+
+Perf mode examples (keep TextGrid output + write perf JSON sidecar):
+
+Python script perf mode (Bash):
+
+```bash
+python scripts/wav2vec2aligner_librispeech_textgrids.py \
+  --dataset-root test-data/LibriSpeech \
+  --subsets test-clean,test-other \
+  --device cuda \
+  --overwrite \
+  --perf-out target/perf/python-perf.json \
+  --perf-warmup 10 \
+  --perf-repeats 30 \
+  --perf-aggregate median
+```
+
+```powershell
+python scripts/wav2vec2aligner_librispeech_textgrids.py `
+  --dataset-root test-data/LibriSpeech `
+  --subsets test-clean,test-other `
+  --device cuda `
+  --overwrite `
+  --perf-out target/perf/python-perf.json `
+  --perf-warmup 10 `
+  --perf-repeats 30 `
+  --perf-aggregate median
+```
+
+Rust bin perf mode (Bash):
+
+```bash
+cargo run --features "report-cli,cuda" --bin alignment_report -- \
+  --dataset-root test-data \
+  --output-format textgrid \
+  --device cuda \
+  --perf-out target/perf/rust-perf.json \
+  --perf-warmup 10 \
+  --perf-repeats 30 \
+  --perf-aggregate median
+```
+
+Rust bin perf append mode (JSONL + summary) (PowerShell):
+
+```powershell
+cargo run --features "report-cli,cuda" --bin alignment_report -- `
+  --dataset-root .\test-data `
+  --output-format textgrid `
+  --device cuda `
+  --perf-out .\target\perf\rust-perf.jsonl `
+  --perf-append `
+  --perf-warmup 10 `
+  --perf-repeats 30 `
+  --perf-aggregate median
+```
+
+### 5) Baseline comparative TextGrid files (upstream project)
+
+The batch script above is intended to generate **baseline comparative** `.TextGrid` files.
+You can use these files as a reference to compare your own alignment implementation.
+
+To respect and credit the original authors, the upstream aligner project is maintained
+separately and should be treated as an external dependency:
+
+- Upstream project: [EveryVoiceTTS/wav2vec2aligner](https://github.com/EveryVoiceTTS/wav2vec2aligner)
+- Keep it as its own repository in your workspace (for example in `wav2vec2aligner-main/`)
+- Install it locally with `pip install -e wav2vec2aligner-main`
+
+If `wav2vec2aligner-main/` is not present yet, clone it first:
+
+```bash
+git clone https://github.com/EveryVoiceTTS/wav2vec2aligner wav2vec2aligner-main
+pip install -e wav2vec2aligner-main
+```
+
+```powershell
+git clone https://github.com/EveryVoiceTTS/wav2vec2aligner wav2vec2aligner-main
+pip install -e wav2vec2aligner-main
+```
+
 ## Alignment Metrics Report (CLI)
 
 The threshold-based integration test is replaced by a deterministic report
@@ -199,7 +453,13 @@ The report command does **not** fail based on timing quality. It only fails on:
 cargo run --features report-cli --bin alignment_report -- --help
 ```
 
-Basic run:
+For CUDA runs with this binary, enable both `report-cli` and `cuda` features:
+
+```bash
+cargo run --features "report-cli,cuda" --bin alignment_report -- --help
+```
+
+Basic run (JSON report mode, default):
 
 ```bash
 cargo run --features report-cli --bin alignment_report -- \
@@ -217,25 +477,47 @@ cargo run --features report-cli --bin alignment_report -- \
   --out target/alignment_reports/failing-cases.json
 ```
 
+Generate TextGrid files instead of JSON (written next to each `.flac`):
+
+```bash
+cargo run --features "report-cli,cuda" --bin alignment_report -- \
+  --dataset-root test-data \
+  --output-format textgrid \
+  --textgrid-suffix _cmp \
+  --device cuda
+```
+
 ### Required local files
 
-- `models/wav2vec2-base-960h/model.safetensors`
+- Candle runtime: `models/wav2vec2-base-960h/model.safetensors`
+- ONNX runtime (`--features onnx`): `models/wav2vec2-base-960h/model.onnx`
 - `models/wav2vec2-base-960h/config.json`
 - `models/wav2vec2-base-960h/vocab.json`
 - `test-data/LibriSpeech/test-clean/**` and/or `test-data/LibriSpeech/test-other/**`
-- TextGrid + sibling FLAC files (the CLI scans for `*.TextGrid` and uses
-  matching `.flac`)
+- For `--output-format=json`: TextGrid + sibling FLAC files (the CLI scans for
+  `*.TextGrid` and uses matching `.flac`)
+- For `--output-format=textgrid`: transcript files (`*.trans.txt`) + sibling
+  FLAC files
 
 ### CLI options
 
 - `--model-dir <PATH>`: model directory (default: `models/wav2vec2-base-960h`)
 - `--dataset-root <PATH>`: dataset root (default: `test-data`)
 - `--cases-file <PATH>`: optional case list file
+- `--output-format <json|textgrid>`: output mode (default: `json`)
+- `--textgrid-suffix <STRING>`: suffix appended before `.TextGrid` in textgrid
+  mode (default: empty)
 - `--out <PATH>`: output JSON path (default:
-  `target/alignment_reports/alignment-report-<timestamp>.json`)
+  `target/alignment_reports/alignment-report-<timestamp>.json`; ignored in
+  `textgrid` mode
 - `--limit <N>`: max selected cases
 - `--offset <N>`: skip first N selected cases
 - `--device <cpu|cuda>`: runtime device (default: `cpu`)
+- `--perf-out <PATH>`: optional perf report path (JSON or JSONL with `--perf-append`)
+- `--perf-warmup <N>`: warm-up iterations on first measured utterance only (default: `10`)
+- `--perf-repeats <N>`: measured repeats per utterance (default: `30`)
+- `--perf-aggregate <median|mean>`: repeat aggregation mode (default: `median`)
+- `--perf-append`: append JSONL records to `--perf-out` (also writes `<perf-out>.summary.json`)
 
 ### Environment variables (optional)
 
@@ -244,10 +526,17 @@ Each CLI option can be configured through an environment variable:
 - `WAV2VEC2_REPORT_MODEL_DIR` -> `--model-dir`
 - `WAV2VEC2_REPORT_DATASET_ROOT` -> `--dataset-root`
 - `WAV2VEC2_REPORT_CASES_FILE` -> `--cases-file`
+- `WAV2VEC2_REPORT_FORMAT` -> `--output-format`
+- `WAV2VEC2_REPORT_TEXTGRID_SUFFIX` -> `--textgrid-suffix`
 - `WAV2VEC2_REPORT_OUT` -> `--out`
 - `WAV2VEC2_REPORT_LIMIT` -> `--limit`
 - `WAV2VEC2_REPORT_OFFSET` -> `--offset`
 - `WAV2VEC2_REPORT_DEVICE` -> `--device`
+- `WAV2VEC2_REPORT_PERF_OUT` -> `--perf-out`
+- `WAV2VEC2_REPORT_PERF_WARMUP` -> `--perf-warmup`
+- `WAV2VEC2_REPORT_PERF_REPEATS` -> `--perf-repeats`
+- `WAV2VEC2_REPORT_PERF_AGGREGATE` -> `--perf-aggregate`
+- `WAV2VEC2_REPORT_PERF_APPEND` -> `--perf-append`
 
 Command-line flags take precedence over environment variables.
 
@@ -278,7 +567,7 @@ tolerates:
 
 ### Report output
 
-The generated JSON includes:
+With `--output-format=json`, the generated JSON includes:
 
 - `schema_version = 1`
 - `meta` (`generated_at`, `model_path`, `device`, `frame_stride_ms`,
@@ -286,3 +575,7 @@ The generated JSON includes:
 - `sentences[]` with per-utterance metrics and `split = clean|other|unknown`
 - `aggregates` with global/per-split distributions and deterministic outlier
   ranking
+
+With `--output-format=textgrid`, the tool writes Praat TextGrid files next to
+each `.flac` file. The output name is `<audio_stem><suffix>.TextGrid`, where
+`suffix` comes from `--textgrid-suffix`.

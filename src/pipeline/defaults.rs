@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use crate::alignment::grouping::group_into_words;
+use crate::alignment::grouping::{group_into_words, group_into_words_profiled};
 use crate::alignment::tokenization::build_token_sequence_case_aware;
 use crate::alignment::viterbi::forced_align_viterbi;
 use crate::error::AlignmentError;
-use crate::pipeline::traits::{SequenceAligner, Tokenizer, WordGrouper};
+use crate::pipeline::traits::{ProfiledWordGrouping, SequenceAligner, Tokenizer, WordGrouper};
 use crate::types::{TokenSequence, WordTiming};
 
 pub struct CaseAwareTokenizer;
@@ -55,5 +55,30 @@ impl WordGrouper for DefaultWordGrouper {
             word_sep_id,
             stride_ms,
         )
+    }
+
+    fn group_words_profiled(
+        &self,
+        path: &[(usize, usize)],
+        token_sequence: &TokenSequence,
+        log_probs: &[Vec<f32>],
+        blank_id: usize,
+        word_sep_id: usize,
+        stride_ms: f64,
+    ) -> ProfiledWordGrouping {
+        let profiled = group_into_words_profiled(
+            path,
+            &token_sequence.tokens,
+            &token_sequence.chars,
+            &token_sequence.normalized_words,
+            log_probs,
+            blank_id,
+            word_sep_id,
+            stride_ms,
+        );
+        ProfiledWordGrouping {
+            words: profiled.words,
+            conf_ms: profiled.conf_ms,
+        }
     }
 }

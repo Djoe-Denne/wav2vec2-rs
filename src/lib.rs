@@ -13,5 +13,5 @@ pub use config::Wav2Vec2Config;
 pub use error::AlignmentError;
 pub use pipeline::builder::ForcedAlignerBuilder;
 pub use pipeline::runtime::ForcedAligner;
-pub use pipeline::traits::{SequenceAligner, Tokenizer, WordGrouper};
+pub use pipeline::traits::{RuntimeBackend, RuntimeKind, SequenceAligner, Tokenizer, WordGrouper};
 pub use types::{AlignmentInput, AlignmentOutput, TokenSequence, WordConfidenceStats, WordTiming};

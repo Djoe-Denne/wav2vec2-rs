@@ -1,4 +1,5 @@
 use crate::types::{WordConfidenceStats, WordTiming};
+use std::time::{Duration, Instant};
 
 mod blank_expansion;
 mod candidate_selector;
@@ -16,6 +17,11 @@ pub(crate) struct RawWord {
     confidence_stats: WordConfidenceStats,
 }
 
+pub struct ProfiledWordGroupingOutput {
+    pub words: Vec<WordTiming>,
+    pub conf_ms: f64,
+}
+
 pub fn group_into_words(
     path: &[(usize, usize)],
     tokens: &[usize],
@@ -26,7 +32,30 @@ pub fn group_into_words(
     word_sep_id: usize,
     stride_ms: f64,
 ) -> Vec<WordTiming> {
-    let raw = path_to_words::collect(
+    group_into_words_profiled(
+        path,
+        tokens,
+        chars,
+        expected_words,
+        log_probs,
+        blank_id,
+        word_sep_id,
+        stride_ms,
+    )
+    .words
+}
+
+pub fn group_into_words_profiled(
+    path: &[(usize, usize)],
+    tokens: &[usize],
+    chars: &[Option<char>],
+    expected_words: &[String],
+    log_probs: &[Vec<f32>],
+    blank_id: usize,
+    word_sep_id: usize,
+    stride_ms: f64,
+) -> ProfiledWordGroupingOutput {
+    let profiled_raw = path_to_words::collect_profiled(
         path,
         tokens,
         chars,
@@ -36,9 +65,13 @@ pub fn group_into_words(
         word_sep_id,
         stride_ms,
     );
-
+    let mut conf_ms = profiled_raw.conf_ms;
+    let raw = profiled_raw.words;
     if raw.is_empty() {
-        return Vec::new();
+        return ProfiledWordGroupingOutput {
+            words: Vec::new(),
+            conf_ms,
+        };
     }
 
     let first_frame = path.first().map(|&(_, f)| f).unwrap_or(0);
@@ -72,14 +105,16 @@ pub fn group_into_words(
         );
     }
 
-    expanded
+    let words = expanded
         .into_iter()
         .map(|mut w| {
             // Timing contract: [start_ms, end_ms), start inclusive and end exclusive.
             let start_ms = (w.start_frame as f64 * stride_ms) as u64;
             let end_ms = ((w.end_frame + 1) as f64 * stride_ms) as u64;
+            let confidence_started = Instant::now();
             let quality_confidence = quality_confidence_score(&w.confidence_stats);
             let calibrated_confidence = quality_confidence.map(calibrate_quality_confidence);
+            conf_ms += duration_to_ms(confidence_started.elapsed());
             w.confidence_stats.quality_confidence = quality_confidence;
             w.confidence_stats.calibrated_confidence = calibrated_confidence;
             tracing::debug!(
@@ -100,7 +135,9 @@ pub fn group_into_words(
                 confidence_stats: w.confidence_stats,
             }
         })
-        .collect()
+        .collect();
+
+    ProfiledWordGroupingOutput { words, conf_ms }
 }
 
 fn quality_confidence_score(stats: &WordConfidenceStats) -> Option<f32> {
@@ -166,4 +203,8 @@ fn calibrate_quality_confidence(score: f32) -> f32 {
         }
     }
     0.99
+}
+
+fn duration_to_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }

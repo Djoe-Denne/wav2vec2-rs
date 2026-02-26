@@ -1,10 +1,10 @@
 use std::collections::{HashMap, HashSet};
-use std::fs::{self, File};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use claxon::FlacReader;
 use indicatif::{ProgressBar, ProgressStyle};
 use textgrid::{TextGrid, TierType};
@@ -14,8 +14,37 @@ use wav2vec2_rs::{
     Wav2Vec2Config, WordTiming,
 };
 
+#[path = "alignment_report/json_report_formatter.rs"]
+mod json_report_formatter;
+#[path = "alignment_report/perf_report_formatter.rs"]
+mod perf_report_formatter;
+#[path = "alignment_report/text_grid_report_formatter.rs"]
+mod text_grid_report_formatter;
+
 const LIBRISPEECH_SUBSETS: [&str; 2] = ["test-clean", "test-other"];
 const OUTLIER_TRACE_TOP_N: usize = 20;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum OutputFormat {
+    Json,
+    #[value(name = "textgrid")]
+    TextGrid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum PerfAggregate {
+    Median,
+    Mean,
+}
+
+impl PerfAggregate {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Median => "median",
+            Self::Mean => "mean",
+        }
+    }
+}
 
 #[derive(Debug, Parser)]
 #[command(name = "alignment_report")]
@@ -43,6 +72,36 @@ struct Args {
     offset: usize,
     #[arg(long, env = "WAV2VEC2_REPORT_DEVICE", default_value = "cpu")]
     device: String,
+    #[arg(
+        long,
+        env = "WAV2VEC2_REPORT_FORMAT",
+        value_enum,
+        default_value_t = OutputFormat::Json
+    )]
+    output_format: OutputFormat,
+    #[arg(long, env = "WAV2VEC2_REPORT_TEXTGRID_SUFFIX", default_value = "")]
+    textgrid_suffix: String,
+    #[arg(long, env = "WAV2VEC2_REPORT_PERF_OUT")]
+    perf_out: Option<PathBuf>,
+    #[arg(long, env = "WAV2VEC2_REPORT_PERF_WARMUP", default_value_t = 10)]
+    perf_warmup: usize,
+    #[arg(long, env = "WAV2VEC2_REPORT_PERF_REPEATS", default_value_t = 30)]
+    perf_repeats: usize,
+    #[arg(
+        long,
+        env = "WAV2VEC2_REPORT_PERF_AGGREGATE",
+        value_enum,
+        default_value_t = PerfAggregate::Median
+    )]
+    perf_aggregate: PerfAggregate,
+    #[arg(long, env = "WAV2VEC2_REPORT_PERF_APPEND", default_value_t = false)]
+    perf_append: bool,
+    #[arg(
+        long,
+        env = "WAV2VEC2_REPORT_PERF_SCALING_REPORT",
+        default_value_t = false
+    )]
+    perf_scaling_report: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +110,17 @@ struct Case {
     audio_path: String,
     transcript: String,
     reference_words: Vec<ReferenceWord>,
+}
+
+#[derive(Debug, Clone)]
+struct ScalingSample {
+    utterance_id: String,
+    num_frames_t: usize,
+    state_len: usize,
+    ts_product: u64,
+    dp_ms: f64,
+    group_ms: f64,
+    conf_ms: f64,
 }
 
 fn main() {
@@ -66,10 +136,42 @@ fn run() -> Result<(), String> {
 
     let model_dir = resolve_path(&repo_root, &args.model_dir);
     let dataset_root = resolve_path(&repo_root, &args.dataset_root);
-    let out_path = resolve_out_path(&repo_root, args.out.as_ref());
+    if args.perf_repeats == 0 {
+        return Err("--perf-repeats must be >= 1.".to_string());
+    }
+    if args.perf_out.is_none()
+        && (args.perf_append
+            || args.perf_warmup != 10
+            || args.perf_repeats != 30
+            || args.perf_aggregate != PerfAggregate::Median
+            || args.perf_scaling_report)
+    {
+        eprintln!("warning: perf flags are ignored unless --perf-out is set");
+    }
+    let out_path = match args.output_format {
+        OutputFormat::Json => Some(resolve_out_path(&repo_root, args.out.as_ref())),
+        OutputFormat::TextGrid => {
+            if args.out.is_some() {
+                eprintln!(
+                    "warning: --out is ignored for --output-format=textgrid (files are written alongside each .flac)"
+                );
+            }
+            None
+        }
+    };
+    let perf_out_path = args
+        .perf_out
+        .as_ref()
+        .map(|path| resolve_path(&repo_root, path));
+    if matches!(args.output_format, OutputFormat::Json) && !args.textgrid_suffix.is_empty() {
+        eprintln!("warning: --textgrid-suffix is ignored for --output-format=json");
+    }
 
     let include_ids = load_case_filter(args.cases_file.as_ref(), &repo_root)?;
-    let mut cases = load_all_cases(&dataset_root)?;
+    let mut cases = match args.output_format {
+        OutputFormat::Json => load_all_cases(&dataset_root)?,
+        OutputFormat::TextGrid => load_all_cases_from_transcripts(&dataset_root)?,
+    };
 
     if let Some(ids) = include_ids.as_ref() {
         let known: HashSet<&str> = cases.iter().map(|case| case.id.as_str()).collect();
@@ -100,6 +202,7 @@ fn run() -> Result<(), String> {
     if cases.is_empty() {
         return Err("No cases selected after applying filters/offset/limit.".to_string());
     }
+    let selected_case_count = cases.len();
 
     let aligner = build_aligner(&model_dir, &args.device)?;
     let frame_stride_ms = aligner.frame_stride_ms();
@@ -118,6 +221,39 @@ fn run() -> Result<(), String> {
     let mut predicted_by_id: HashMap<String, Vec<WordTiming>> = HashMap::with_capacity(cases.len());
     let mut references_by_id: HashMap<String, Vec<ReferenceWord>> =
         HashMap::with_capacity(cases.len());
+    let mut written_textgrids = 0usize;
+    let mut lib_work_elapsed = Duration::ZERO;
+    let perf_enabled = perf_out_path.is_some();
+    let perf_config = perf_report_formatter::PerfRunConfig {
+        warmup: args.perf_warmup,
+        repeats: args.perf_repeats,
+        aggregate: args.perf_aggregate.as_str().to_string(),
+        append: args.perf_append,
+    };
+    let mut perf_jsonl_appender = if perf_enabled && args.perf_append {
+        let perf_path = perf_out_path
+            .as_ref()
+            .ok_or_else(|| "internal error: missing --perf-out path".to_string())?;
+        Some(perf_report_formatter::PerfJsonlAppender::open(perf_path)?)
+    } else {
+        None
+    };
+    let mut perf_records = if perf_enabled && !args.perf_append {
+        Vec::with_capacity(cases.len())
+    } else {
+        Vec::new()
+    };
+    let mut perf_forward_samples = Vec::new();
+    let mut perf_post_samples = Vec::new();
+    let mut perf_dp_samples = Vec::new();
+    let mut perf_group_samples = Vec::new();
+    let mut perf_conf_samples = Vec::new();
+    let mut perf_align_samples = Vec::new();
+    let mut perf_align_per_ts_samples = Vec::new();
+    let mut perf_align_per_t_samples = Vec::new();
+    let mut perf_total_samples = Vec::new();
+    let mut scaling_samples = Vec::new();
+    let mut perf_warmup_done = false;
     let progress = ProgressBar::new(cases.len() as u64);
     progress.set_style(
         ProgressStyle::with_template(
@@ -143,55 +279,274 @@ fn run() -> Result<(), String> {
             ((samples.len() as u128) * 1000 / sample_rate_hz as u128) as u64
         };
 
-        let output = aligner
-            .align(&AlignmentInput {
-                sample_rate_hz,
-                samples,
-                transcript: case.transcript.clone(),
-            })
-            .map_err(|err| format!("{}: align() failed: {err}", case.id))?;
+        let alignment_input = AlignmentInput {
+            sample_rate_hz,
+            samples,
+            transcript: case.transcript.clone(),
+        };
+        let output_words = if perf_enabled {
+            if !perf_warmup_done {
+                for _ in 0..args.perf_warmup {
+                    aligner
+                        .align_profiled(&alignment_input)
+                        .map_err(|err| format!("{}: warm-up align() failed: {err}", case.id))?;
+                }
+                perf_warmup_done = true;
+            }
 
-        let split = infer_split(&case.audio_path);
-        let sentence = compute_sentence_report(
-            &case.id,
-            split,
-            &output.words,
-            Some(&case.reference_words),
-            duration_ms,
-        )
-        .map_err(|err| format!("{}: metric computation failed: {err}", case.id))?;
+            let mut forward_ms_repeats = Vec::with_capacity(args.perf_repeats);
+            let mut post_ms_repeats = Vec::with_capacity(args.perf_repeats);
+            let mut dp_ms_repeats = Vec::with_capacity(args.perf_repeats);
+            let mut group_ms_repeats = Vec::with_capacity(args.perf_repeats);
+            let mut conf_ms_repeats = Vec::with_capacity(args.perf_repeats);
+            let mut align_ms_repeats = Vec::with_capacity(args.perf_repeats);
+            let mut total_ms_repeats = Vec::with_capacity(args.perf_repeats);
+            let mut selected_words: Option<Vec<WordTiming>> = None;
+            let mut selected_num_frames_t = 0usize;
+            let mut selected_state_len = 0usize;
+            let mut selected_ts_product = 0u64;
+            let mut selected_vocab_size = 0usize;
+            let mut selected_dtype = String::new();
+            let mut selected_device = String::new();
 
-        predicted_by_id.insert(case.id.clone(), output.words);
-        references_by_id.insert(case.id.clone(), case.reference_words.clone());
-        sentence_reports.push(sentence);
+            for repeat_idx in 0..args.perf_repeats {
+                let profiled = aligner
+                    .align_profiled(&alignment_input)
+                    .map_err(|err| format!("{}: perf align() failed: {err}", case.id))?;
+                let timings = profiled.timings;
+                forward_ms_repeats.push(timings.forward_ms);
+                post_ms_repeats.push(timings.post_ms);
+                dp_ms_repeats.push(timings.dp_ms);
+                group_ms_repeats.push(timings.group_ms);
+                conf_ms_repeats.push(timings.conf_ms);
+                align_ms_repeats.push(timings.align_ms);
+                total_ms_repeats.push(timings.total_ms);
+
+                if repeat_idx == 0 {
+                    selected_words = Some(profiled.output.words);
+                    selected_num_frames_t = profiled.num_frames_t;
+                    selected_state_len = profiled.state_len;
+                    selected_ts_product = profiled.ts_product;
+                    selected_vocab_size = profiled.vocab_size;
+                    selected_dtype = profiled.dtype;
+                    selected_device = profiled.device;
+                }
+            }
+
+            let forward_ms = aggregate_measurements(&forward_ms_repeats, args.perf_aggregate);
+            let post_ms = aggregate_measurements(&post_ms_repeats, args.perf_aggregate);
+            let dp_ms = aggregate_measurements(&dp_ms_repeats, args.perf_aggregate);
+            let group_ms = aggregate_measurements(&group_ms_repeats, args.perf_aggregate);
+            let conf_ms = aggregate_measurements(&conf_ms_repeats, args.perf_aggregate);
+            // Keep record-level substage timings internally consistent even when
+            // the selected aggregate is median (median(a+b) != median(a)+median(b)).
+            let align_ms = dp_ms + group_ms + conf_ms;
+            let total_ms = aggregate_measurements(&total_ms_repeats, args.perf_aggregate);
+            let align_ms_per_ts = if selected_ts_product > 0 {
+                align_ms / selected_ts_product as f64
+            } else {
+                0.0
+            };
+            let align_ms_per_t = if selected_num_frames_t > 0 {
+                align_ms / selected_num_frames_t as f64
+            } else {
+                0.0
+            };
+
+            let record = perf_report_formatter::PerfUtteranceRecord {
+                utterance_id: case.id.clone(),
+                audio_path: case.audio_path.clone(),
+                duration_ms,
+                num_frames_t: selected_num_frames_t,
+                state_len: selected_state_len,
+                ts_product: selected_ts_product,
+                vocab_size: selected_vocab_size,
+                dtype: selected_dtype,
+                device: selected_device,
+                frame_stride_ms,
+                warmup: args.perf_warmup,
+                repeats: args.perf_repeats,
+                aggregate: args.perf_aggregate.as_str().to_string(),
+                forward_ms,
+                post_ms,
+                dp_ms,
+                group_ms,
+                conf_ms,
+                align_ms,
+                align_ms_per_ts,
+                align_ms_per_t,
+                total_ms,
+                forward_ms_repeats,
+                post_ms_repeats,
+                dp_ms_repeats,
+                group_ms_repeats,
+                conf_ms_repeats,
+                align_ms_repeats,
+                total_ms_repeats,
+            };
+
+            perf_forward_samples.push(record.forward_ms);
+            perf_post_samples.push(record.post_ms);
+            perf_dp_samples.push(record.dp_ms);
+            perf_group_samples.push(record.group_ms);
+            perf_conf_samples.push(record.conf_ms);
+            perf_align_samples.push(record.align_ms);
+            perf_align_per_ts_samples.push(record.align_ms_per_ts);
+            perf_align_per_t_samples.push(record.align_ms_per_t);
+            perf_total_samples.push(record.total_ms);
+            scaling_samples.push(ScalingSample {
+                utterance_id: record.utterance_id.clone(),
+                num_frames_t: record.num_frames_t,
+                state_len: record.state_len,
+                ts_product: record.ts_product,
+                dp_ms: record.dp_ms,
+                group_ms: record.group_ms,
+                conf_ms: record.conf_ms,
+            });
+            lib_work_elapsed += Duration::from_secs_f64(record.total_ms / 1000.0);
+
+            if args.perf_append {
+                let appender = perf_jsonl_appender
+                    .as_mut()
+                    .ok_or_else(|| "internal error: missing perf JSONL appender".to_string())?;
+                appender.append(&record)?;
+            } else {
+                perf_records.push(record);
+            }
+
+            selected_words.ok_or_else(|| format!("{}: missing profiled output words", case.id))?
+        } else {
+            let lib_started = Instant::now();
+            let output = aligner
+                .align(&alignment_input)
+                .map_err(|err| format!("{}: align() failed: {err}", case.id))?;
+            lib_work_elapsed += lib_started.elapsed();
+            output.words
+        };
+
+        match args.output_format {
+            OutputFormat::Json => {
+                let split = infer_split(&case.audio_path);
+                let sentence = compute_sentence_report(
+                    &case.id,
+                    split,
+                    &output_words,
+                    Some(&case.reference_words),
+                    duration_ms,
+                )
+                .map_err(|err| format!("{}: metric computation failed: {err}", case.id))?;
+
+                predicted_by_id.insert(case.id.clone(), output_words);
+                references_by_id.insert(case.id.clone(), case.reference_words.clone());
+                sentence_reports.push(sentence);
+            }
+            OutputFormat::TextGrid => {
+                text_grid_report_formatter::write_textgrid(
+                    &dataset_root,
+                    &case.audio_path,
+                    &case.transcript,
+                    &output_words,
+                    duration_ms,
+                    &args.textgrid_suffix,
+                )?;
+                written_textgrids += 1;
+            }
+        }
         progress.inc(1);
     }
     progress.finish_with_message("alignment pass complete");
-
-    let mut sentences = sentence_reports;
-    let aggregates = aggregate_reports(&sentences);
-    attach_outlier_traces(
-        &mut sentences,
-        &predicted_by_id,
-        &references_by_id,
-        OUTLIER_TRACE_TOP_N,
+    let lib_work_seconds = lib_work_elapsed.as_secs_f64();
+    let avg_lib_case_ms = if selected_case_count > 0 {
+        lib_work_seconds * 1000.0 / selected_case_count as f64
+    } else {
+        0.0
+    };
+    println!(
+        "lib_work_elapsed: {:.2}s ({}) avg_per_case: {:.2}ms",
+        lib_work_seconds,
+        format_duration_hms(lib_work_elapsed),
+        avg_lib_case_ms
     );
 
-    let report = Report {
-        schema_version: 1,
-        meta: Meta {
-            generated_at: Utc::now().to_rfc3339(),
-            model_path: model_dir.to_string_lossy().into_owned(),
-            device: args.device,
-            frame_stride_ms: frame_stride_ms as f32,
-            case_count: sentences.len(),
-        },
-        sentences,
-        aggregates,
-    };
+    match args.output_format {
+        OutputFormat::Json => {
+            let mut sentences = sentence_reports;
+            let aggregates = aggregate_reports(&sentences);
+            attach_outlier_traces(
+                &mut sentences,
+                &predicted_by_id,
+                &references_by_id,
+                OUTLIER_TRACE_TOP_N,
+            );
 
-    write_report(&out_path, &report)?;
-    println!("{}", out_path.display());
+            let report = Report {
+                schema_version: 1,
+                meta: Meta {
+                    generated_at: Utc::now().to_rfc3339(),
+                    model_path: model_dir.to_string_lossy().into_owned(),
+                    device: args.device,
+                    frame_stride_ms: frame_stride_ms as f32,
+                    case_count: sentences.len(),
+                },
+                sentences,
+                aggregates,
+            };
+
+            let out_path = out_path.ok_or_else(|| {
+                "internal error: missing output path for JSON report format".to_string()
+            })?;
+            json_report_formatter::write_report(&out_path, &report)?;
+            println!("{}", out_path.display());
+        }
+        OutputFormat::TextGrid => {
+            if args.textgrid_suffix.is_empty() {
+                println!(
+                    "Wrote {written_textgrids} TextGrid file(s) alongside LibriSpeech .flac files."
+                );
+            } else {
+                println!(
+                    "Wrote {written_textgrids} TextGrid file(s) with suffix '{}' alongside LibriSpeech .flac files.",
+                    args.textgrid_suffix
+                );
+            }
+        }
+    }
+
+    if let Some(perf_path) = perf_out_path.as_ref() {
+        let aggregate = perf_report_formatter::PerfAggregateStats {
+            utterance_count: perf_total_samples.len(),
+            forward_ms: summarize_metric(&perf_forward_samples),
+            post_ms: summarize_metric(&perf_post_samples),
+            dp_ms: summarize_metric(&perf_dp_samples),
+            group_ms: summarize_metric(&perf_group_samples),
+            conf_ms: summarize_metric(&perf_conf_samples),
+            align_ms: summarize_metric(&perf_align_samples),
+            align_ms_per_ts: summarize_metric(&perf_align_per_ts_samples),
+            align_ms_per_t: summarize_metric(&perf_align_per_t_samples),
+            total_ms: summarize_metric(&perf_total_samples),
+        };
+        if args.perf_append {
+            if let Some(appender) = perf_jsonl_appender.take() {
+                appender.finish()?;
+            }
+            let summary_path = perf_report_formatter::summary_path_for(perf_path);
+            perf_report_formatter::write_summary_report(&summary_path, &perf_config, &aggregate)?;
+            println!("{}", perf_path.display());
+            println!("{}", summary_path.display());
+        } else {
+            perf_report_formatter::write_json_report(
+                perf_path,
+                &perf_config,
+                &perf_records,
+                &aggregate,
+            )?;
+            println!("{}", perf_path.display());
+        }
+
+        if args.perf_scaling_report {
+            print_scaling_report(&scaling_samples);
+        }
+    }
     Ok(())
 }
 
@@ -236,34 +591,23 @@ fn resolve_out_path(repo_root: &Path, out: Option<&PathBuf>) -> PathBuf {
         .join(format!("alignment-report-{run_id}.json"))
 }
 
-fn write_report(path: &Path, report: &Report) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|err| {
-            format!(
-                "Failed to create report output directory '{}': {err}",
-                parent.display()
-            )
-        })?;
-    }
-
-    let mut file = File::create(path)
-        .map_err(|err| format!("Failed to create report file '{}': {err}", path.display()))?;
-    serde_json::to_writer_pretty(&mut file, report).map_err(|err| {
-        format!(
-            "Failed to serialize report JSON '{}': {err}",
-            path.display()
-        )
-    })?;
-    file.write_all(b"\n")
-        .map_err(|err| format!("Failed to finalize report file '{}': {err}", path.display()))?;
-    Ok(())
-}
-
 fn load_all_cases(dataset_root: &Path) -> Result<Vec<Case>, String> {
     let librispeech_dir = dataset_root.join("LibriSpeech");
     let mut all_cases = Vec::new();
     for subset in LIBRISPEECH_SUBSETS {
         all_cases.extend(load_cases_from_subset(
+            &librispeech_dir.join(subset),
+            dataset_root,
+        )?);
+    }
+    Ok(all_cases)
+}
+
+fn load_all_cases_from_transcripts(dataset_root: &Path) -> Result<Vec<Case>, String> {
+    let librispeech_dir = dataset_root.join("LibriSpeech");
+    let mut all_cases = Vec::new();
+    for subset in LIBRISPEECH_SUBSETS {
+        all_cases.extend(load_cases_from_subset_transcripts(
             &librispeech_dir.join(subset),
             dataset_root,
         )?);
@@ -293,6 +637,84 @@ fn load_cases_from_subset(subset_dir: &Path, dataset_root: &Path) -> Result<Vec<
         .collect()
 }
 
+fn load_cases_from_subset_transcripts(
+    subset_dir: &Path,
+    dataset_root: &Path,
+) -> Result<Vec<Case>, String> {
+    require_path_exists(
+        subset_dir,
+        "Missing LibriSpeech subset directory under dataset root.",
+    )?;
+
+    let mut transcriptions = Vec::new();
+    collect_transcription_files(subset_dir, &mut transcriptions)?;
+    transcriptions.sort();
+    if transcriptions.is_empty() {
+        return Err(format!(
+            "No *.trans.txt files found in '{}'.",
+            subset_dir.display()
+        ));
+    }
+
+    let mut cases = Vec::new();
+    for transcript_path in transcriptions {
+        let transcript_contents = fs::read_to_string(&transcript_path).map_err(|err| {
+            format!(
+                "Failed to read transcript file '{}': {err}",
+                transcript_path.display()
+            )
+        })?;
+        for (line_no, raw_line) in transcript_contents.lines().enumerate() {
+            let line = raw_line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            let mut parts = line.split_whitespace();
+            let Some(id) = parts.next() else {
+                continue;
+            };
+            let transcript = line[id.len()..].trim();
+            if transcript.is_empty() {
+                continue;
+            }
+
+            let audio_abs_path = transcript_path
+                .parent()
+                .unwrap_or(subset_dir)
+                .join(format!("{id}.flac"));
+            require_path_exists(
+                &audio_abs_path,
+                &format!(
+                    "Missing sibling .flac for transcript entry '{}' at line {} in '{}'.",
+                    id,
+                    line_no + 1,
+                    transcript_path.display()
+                ),
+            )?;
+            let audio_path = audio_abs_path
+                .strip_prefix(dataset_root)
+                .map_err(|err| {
+                    format!(
+                        "Failed to make audio path '{}' relative to '{}': {err}",
+                        audio_abs_path.display(),
+                        dataset_root.display()
+                    )
+                })?
+                .to_string_lossy()
+                .replace('\\', "/");
+
+            cases.push(Case {
+                id: id.to_string(),
+                audio_path,
+                transcript: transcript.to_string(),
+                reference_words: Vec::new(),
+            });
+        }
+    }
+
+    Ok(cases)
+}
+
 fn collect_textgrid_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
     let entries = fs::read_dir(dir)
         .map_err(|err| format!("Failed to read directory '{}': {err}", dir.display()))?;
@@ -312,6 +734,32 @@ fn collect_textgrid_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), Stri
             .extension()
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| ext.eq_ignore_ascii_case("TextGrid"))
+        {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn collect_transcription_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(dir)
+        .map_err(|err| format!("Failed to read directory '{}': {err}", dir.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            format!(
+                "Failed to read directory entry in '{}': {err}",
+                dir.display()
+            )
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_transcription_files(&path, out)?;
+            continue;
+        }
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.ends_with(".trans.txt"))
         {
             out.push(path);
         }
@@ -634,6 +1082,153 @@ fn resolve_path(repo_root: &Path, path: &Path) -> PathBuf {
     } else {
         repo_root.join(path)
     }
+}
+
+fn aggregate_measurements(values: &[f64], mode: PerfAggregate) -> f64 {
+    match mode {
+        PerfAggregate::Median => median(values),
+        PerfAggregate::Mean => mean(values),
+    }
+}
+
+fn summarize_metric(values: &[f64]) -> perf_report_formatter::PerfMetricStats {
+    if values.is_empty() {
+        return perf_report_formatter::PerfMetricStats {
+            mean: 0.0,
+            median: 0.0,
+            min: 0.0,
+            max: 0.0,
+        };
+    }
+    let min = values
+        .iter()
+        .copied()
+        .min_by(f64::total_cmp)
+        .unwrap_or_default();
+    let max = values
+        .iter()
+        .copied()
+        .max_by(f64::total_cmp)
+        .unwrap_or_default();
+    perf_report_formatter::PerfMetricStats {
+        mean: mean(values),
+        median: median(values),
+        min,
+        max,
+    }
+}
+
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    values.iter().sum::<f64>() / values.len() as f64
+}
+
+fn median(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let mid = sorted.len() / 2;
+    if sorted.len() % 2 == 0 {
+        (sorted[mid - 1] + sorted[mid]) / 2.0
+    } else {
+        sorted[mid]
+    }
+}
+
+fn print_scaling_report(samples: &[ScalingSample]) {
+    println!("perf_scaling_report:");
+    if samples.is_empty() {
+        println!("scaling_summary: utterances=0 corr_dp_ms_vs_ts=0.000000");
+        return;
+    }
+
+    for sample in samples {
+        println!(
+            "scaling_case utterance_id={} T={} S={} TS={} dp_ms={:.6} group_ms={:.6} conf_ms={:.6}",
+            sample.utterance_id,
+            sample.num_frames_t,
+            sample.state_len,
+            sample.ts_product,
+            sample.dp_ms,
+            sample.group_ms,
+            sample.conf_ms
+        );
+    }
+
+    let xs = samples
+        .iter()
+        .map(|sample| sample.ts_product as f64)
+        .collect::<Vec<_>>();
+    let ys = samples
+        .iter()
+        .map(|sample| sample.dp_ms)
+        .collect::<Vec<_>>();
+    let corr = pearson_correlation(&xs, &ys);
+    println!(
+        "scaling_summary: utterances={} corr_dp_ms_vs_ts={:.6}",
+        samples.len(),
+        corr
+    );
+
+    let mut outliers = samples
+        .iter()
+        .map(|sample| {
+            let dp_ms_per_ts = if sample.ts_product > 0 {
+                sample.dp_ms / sample.ts_product as f64
+            } else {
+                0.0
+            };
+            (sample, dp_ms_per_ts)
+        })
+        .collect::<Vec<_>>();
+    outliers.sort_by(|left, right| right.1.total_cmp(&left.1));
+    for (rank, (sample, dp_ms_per_ts)) in outliers.into_iter().take(5).enumerate() {
+        println!(
+            "scaling_outlier rank={} utterance_id={} dp_ms_per_ts={:.9} dp_ms={:.6} TS={}",
+            rank + 1,
+            sample.utterance_id,
+            dp_ms_per_ts,
+            sample.dp_ms,
+            sample.ts_product
+        );
+    }
+}
+
+fn pearson_correlation(xs: &[f64], ys: &[f64]) -> f64 {
+    if xs.len() != ys.len() || xs.len() < 2 {
+        return 0.0;
+    }
+    let x_mean = mean(xs);
+    let y_mean = mean(ys);
+    let mut cov = 0.0;
+    let mut x_var = 0.0;
+    let mut y_var = 0.0;
+    for (&x, &y) in xs.iter().zip(ys.iter()) {
+        let xd = x - x_mean;
+        let yd = y - y_mean;
+        cov += xd * yd;
+        x_var += xd * xd;
+        y_var += yd * yd;
+    }
+    if x_var <= f64::EPSILON || y_var <= f64::EPSILON {
+        return 0.0;
+    }
+    cov / (x_var.sqrt() * y_var.sqrt())
+}
+
+fn format_duration_hms(duration: Duration) -> String {
+    let total_ms = duration.as_millis();
+    let hours = total_ms / 3_600_000;
+    let rem_after_hours = total_ms % 3_600_000;
+    let minutes = rem_after_hours / 60_000;
+    let rem_after_minutes = rem_after_hours % 60_000;
+    let seconds = rem_after_minutes / 1_000;
+    let millis = rem_after_minutes % 1_000;
+    format!("{hours:02}:{minutes:02}:{seconds:02}.{millis:03}")
 }
 
 fn require_path_exists(path: &Path, message: &str) -> Result<(), String> {

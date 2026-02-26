@@ -16,9 +16,12 @@ __pycache__/
 models/
 tests/test_settings.json
 test-data/
+*.flac
 
 .venv/
 
 .env
 .bolt
 node_modules/
+
+wav2vec2aligner-main/

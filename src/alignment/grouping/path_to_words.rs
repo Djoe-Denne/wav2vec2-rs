@@ -1,5 +1,6 @@
 use super::RawWord;
 use crate::types::WordConfidenceStats;
+use std::time::{Duration, Instant};
 
 /// Word completion check used before flushing a boundary.
 ///
@@ -21,16 +22,19 @@ fn flush_word(
     emission_lp_accum: &mut Vec<f32>,
     emission_margin_accum: &mut Vec<f32>,
     coverage_frame_count: &mut usize,
+    conf_ms: &mut f64,
     out: &mut Vec<RawWord>,
 ) {
     if cur_word.is_empty() {
         return;
     }
+    let confidence_started = Instant::now();
     let confidence_stats = build_confidence_stats(
         emission_lp_accum,
         emission_margin_accum,
         *coverage_frame_count,
     );
+    *conf_ms += duration_to_ms(confidence_started.elapsed());
     // Raw acoustic support retained for boundary scoring; final word confidence
     // score is derived later from full confidence_stats.
     let confidence = confidence_stats.geo_mean_prob;
@@ -56,9 +60,14 @@ fn flush_word(
     *coverage_frame_count = 0;
 }
 
+pub(super) struct ProfiledRawWords {
+    pub(super) words: Vec<RawWord>,
+    pub(super) conf_ms: f64,
+}
+
 /// Phase 1: Walk the Viterbi path and group character frames into words.
 /// Boundaries are tight — only character-emitting frames set start/end.
-pub(super) fn collect(
+pub(super) fn collect_profiled(
     path: &[(usize, usize)],
     tokens: &[usize],
     chars: &[Option<char>],
@@ -67,7 +76,7 @@ pub(super) fn collect(
     blank_id: usize,
     word_sep_id: usize,
     stride_ms: f64,
-) -> Vec<RawWord> {
+) -> ProfiledRawWords {
     let mut words = Vec::new();
     let mut cur_word = String::new();
     let mut start_frame: Option<usize> = None;
@@ -76,6 +85,7 @@ pub(super) fn collect(
     let mut emission_margin_accum = Vec::new();
     let mut coverage_frame_count = 0usize;
     let mut prev_state: Option<usize> = None;
+    let mut conf_ms = 0.0;
 
     let words_from_chars = reconstruct_words_from_chars(chars);
     if words_from_chars != expected_words {
@@ -125,6 +135,7 @@ pub(super) fn collect(
                 &mut emission_lp_accum,
                 &mut emission_margin_accum,
                 &mut coverage_frame_count,
+                &mut conf_ms,
                 &mut words,
             );
             prev_state = Some(s);
@@ -140,7 +151,9 @@ pub(super) fn collect(
             if is_new_state {
                 // Confidence uses emission events (state changes), not repeated holds.
                 emission_lp_accum.push(log_probs[frame][tid]);
+                let top2_started = Instant::now();
                 emission_margin_accum.push(top2_margin_logp(&log_probs[frame]));
+                conf_ms += duration_to_ms(top2_started.elapsed());
                 cur_word.push(c);
             }
             tracing::debug!(
@@ -166,9 +179,10 @@ pub(super) fn collect(
         &mut emission_lp_accum,
         &mut emission_margin_accum,
         &mut coverage_frame_count,
+        &mut conf_ms,
         &mut words,
     );
-    words
+    ProfiledRawWords { words, conf_ms }
 }
 
 fn reconstruct_words_from_chars(chars: &[Option<char>]) -> Vec<String> {
@@ -264,4 +278,8 @@ fn percentile_sorted(sorted_values: &[f32], percentile: f32) -> f32 {
         let weight = rank - lower as f32;
         sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
     }
+}
+
+fn duration_to_ms(duration: Duration) -> f64 {
+    duration.as_secs_f64() * 1000.0
 }
