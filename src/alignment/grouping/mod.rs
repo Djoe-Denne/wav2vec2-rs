@@ -20,6 +20,10 @@ pub(crate) struct RawWord {
 pub struct ProfiledWordGroupingOutput {
     pub words: Vec<WordTiming>,
     pub conf_ms: f64,
+    /// Time spent walking the Viterbi path and collecting raw word boundaries.
+    pub collect_ms: f64,
+    /// Time spent cloning candidates, expanding blanks, and selecting the best policy.
+    pub expand_select_ms: f64,
 }
 
 pub fn group_into_words(
@@ -55,6 +59,8 @@ pub fn group_into_words_profiled(
     word_sep_id: usize,
     stride_ms: f64,
 ) -> ProfiledWordGroupingOutput {
+    // --- Block 1: collect raw words from Viterbi path ---
+    let collect_started = Instant::now();
     let profiled_raw = path_to_words::collect_profiled(
         path,
         tokens,
@@ -65,15 +71,20 @@ pub fn group_into_words_profiled(
         word_sep_id,
         stride_ms,
     );
-    let mut conf_ms = profiled_raw.conf_ms;
+    let collect_ms = duration_to_ms(collect_started.elapsed());
+
     let raw = profiled_raw.words;
     if raw.is_empty() {
         return ProfiledWordGroupingOutput {
             words: Vec::new(),
-            conf_ms,
+            conf_ms: 0.0,
+            collect_ms,
+            expand_select_ms: 0.0,
         };
     }
 
+    // --- Block 2: expand + select best candidate ---
+    let expand_select_started = Instant::now();
     let first_frame = path.first().map(|&(_, f)| f).unwrap_or(0);
     let last_frame = path.last().map(|&(_, f)| f).unwrap_or(0);
     let mut candidates = Vec::with_capacity(blank_expansion::ExpansionPolicy::ALL.len());
@@ -93,6 +104,7 @@ pub fn group_into_words_profiled(
                 None,
             ),
         };
+    let expand_select_ms = duration_to_ms(expand_select_started.elapsed());
 
     if let Some(score) = selected_score {
         tracing::debug!(
@@ -105,16 +117,16 @@ pub fn group_into_words_profiled(
         );
     }
 
+    // --- Block 3: confidence scoring ---
+    let conf_started = Instant::now();
     let words = expanded
         .into_iter()
         .map(|mut w| {
             // Timing contract: [start_ms, end_ms), start inclusive and end exclusive.
             let start_ms = (w.start_frame as f64 * stride_ms) as u64;
             let end_ms = ((w.end_frame + 1) as f64 * stride_ms) as u64;
-            let confidence_started = Instant::now();
             let quality_confidence = quality_confidence_score(&w.confidence_stats);
             let calibrated_confidence = quality_confidence.map(calibrate_quality_confidence);
-            conf_ms += duration_to_ms(confidence_started.elapsed());
             w.confidence_stats.quality_confidence = quality_confidence;
             w.confidence_stats.calibrated_confidence = calibrated_confidence;
             tracing::debug!(
@@ -136,8 +148,14 @@ pub fn group_into_words_profiled(
             }
         })
         .collect();
+    let conf_ms = duration_to_ms(conf_started.elapsed());
 
-    ProfiledWordGroupingOutput { words, conf_ms }
+    ProfiledWordGroupingOutput {
+        words,
+        conf_ms,
+        collect_ms,
+        expand_select_ms,
+    }
 }
 
 fn quality_confidence_score(stats: &WordConfidenceStats) -> Option<f32> {

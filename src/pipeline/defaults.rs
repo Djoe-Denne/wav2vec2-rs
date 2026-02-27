@@ -79,6 +79,8 @@ impl WordGrouper for DefaultWordGrouper {
         ProfiledWordGrouping {
             words: profiled.words,
             conf_ms: profiled.conf_ms,
+            collect_ms: profiled.collect_ms,
+            expand_select_ms: profiled.expand_select_ms,
         }
     }
 }

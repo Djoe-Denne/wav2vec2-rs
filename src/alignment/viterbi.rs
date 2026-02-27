@@ -1,20 +1,73 @@
-pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(usize, usize)> {
-    const STEP_STAY: u8 = 0;
-    const STEP_PREV_1: u8 = 1;
-    const STEP_PREV_2: u8 = 2;
+#[cfg(feature = "cuda-dp")]
+#[path = "cuda/viterbi_cuda.rs"]
+pub mod cuda;
 
+#[cfg(feature = "gpu-dp")]
+#[path = "gpu/viterbi_gpu.rs"]
+pub mod gpu;
+
+/// GPU DP threshold: below this T×S, CPU is faster than GPU launch overhead.
+const GPU_DP_THRESHOLD: usize = 40_000;
+
+/// CTC Viterbi forced alignment.
+///
+/// Dispatch priority:
+/// 1. `cuda-dp` zero-copy (reads ORT output directly on GPU — no transfer)
+/// 2. `gpu-dp` wgpu (Vulkan/DX12/Metal — needs host log_probs)
+/// 3. CPU fallback (always available)
+pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(usize, usize)> {
+    let ts_product = log_probs.len() * tokens.len();
+
+    if ts_product >= GPU_DP_THRESHOLD {
+        #[cfg(feature = "gpu-dp")]
+        {
+            if let Some(path) = gpu::forced_align_viterbi_gpu(log_probs, tokens) {
+                return path;
+            }
+            tracing::debug!("wgpu Viterbi unavailable, falling back to CPU");
+        }
+    }
+
+    forced_align_viterbi_cpu(log_probs, tokens)
+}
+
+/// Zero-copy variant: skips post_ms entirely.
+///
+/// Called from the pipeline when ORT runs on CUDA and we have
+/// the device pointer to the log_probs tensor.
+///
+/// Falls through: cuda-dp → gpu-dp (with host copy) → cpu
+///
+/// # Safety
+/// `log_probs_dev_ptr` must be a valid CUDA device pointer.
+#[cfg(feature = "cuda-dp")]
+pub unsafe fn forced_align_viterbi_zerocopy(
+    log_probs_dev_ptr: *const f32,
+    t_len: usize,
+    v_len: usize,
+    tokens: &[usize],
+) -> Vec<(usize, usize)> {
+    if let Some(path) = cuda::forced_align_viterbi_cuda_zerocopy(
+        log_probs_dev_ptr, t_len, v_len, tokens,
+    ) {
+        return path;
+    }
+    tracing::warn!("CUDA Viterbi failed, cannot use zero-copy path");
+    // Can't fall back without host data — return empty and let caller handle
+    Vec::new()
+}
+
+/// CPU-only CTC Viterbi (always available).
+pub fn forced_align_viterbi_cpu(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(usize, usize)> {
     let t_len = log_probs.len();
     let s_len = tokens.len();
     if t_len == 0 || s_len == 0 {
         return Vec::new();
     }
 
-    // Two rolling score rows keep hot data cache-friendly.
     let mut prev = vec![f32::NEG_INFINITY; s_len];
     let mut curr = vec![f32::NEG_INFINITY; s_len];
-    // Compact transition-steps are enough to reconstruct the full path:
-    // 0=stay, 1=from s-1, 2=from s-2.
-    let mut bp = vec![STEP_STAY; t_len * s_len];
+    let mut bp = vec![0u8; t_len * s_len];
 
     prev[0] = log_probs[0][tokens[0]];
     if s_len > 1 {
@@ -28,47 +81,15 @@ pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(us
     for t in 1..t_len {
         let row = &log_probs[t];
         let remaining = t_len - 1 - t;
-
-        // Reachability band:
-        // - forward: from start, at most +2 states per frame (+1 offset at t=0)
-        // - backward: enough frames left to still reach one of final states
         let curr_start = final_floor_state.saturating_sub(2 * remaining);
         let curr_end = (2 * t + 1).min(s_len - 1);
 
+        let bp_offset = t * s_len;
         for s in curr_start..=curr_end {
             let emit = row[tokens[s]];
-            let mut best = f32::NEG_INFINITY;
-            let mut step = STEP_STAY;
-
-            if s >= prev_start && s <= prev_end {
-                best = prev[s];
-                step = STEP_STAY;
-            }
-
-            if s >= 1 {
-                let p = s - 1;
-                if p >= prev_start && p <= prev_end {
-                    let cand = prev[p];
-                    if cand > best {
-                        best = cand;
-                        step = STEP_PREV_1;
-                    }
-                }
-            }
-
-            if s >= 2 && tokens[s] != tokens[s - 2] {
-                let p = s - 2;
-                if p >= prev_start && p <= prev_end {
-                    let cand = prev[p];
-                    if cand > best {
-                        best = cand;
-                        step = STEP_PREV_2;
-                    }
-                }
-            }
-
+            let (best, step) = best_transition(&prev, s, prev_start, prev_end, tokens);
             curr[s] = best + emit;
-            bp[t * s_len + s] = step;
+            bp[bp_offset + s] = step;
         }
 
         std::mem::swap(&mut prev, &mut curr);
@@ -85,19 +106,53 @@ pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(us
     path.push((s, t_len - 1));
     for t in (1..t_len).rev() {
         s = match bp[t * s_len + s] {
-            STEP_STAY => s,
-            STEP_PREV_1 => {
-                debug_assert!(s >= 1);
-                s - 1
-            }
-            STEP_PREV_2 => {
-                debug_assert!(s >= 2);
-                s - 2
-            }
+            0 => s,
+            1 => { debug_assert!(s >= 1); s - 1 }
+            2 => { debug_assert!(s >= 2); s - 2 }
             _ => s,
         };
         path.push((s, t - 1));
     }
     path.reverse();
     path
+}
+
+#[inline(always)]
+fn best_transition(
+    prev: &[f32],
+    s: usize,
+    prev_start: usize,
+    prev_end: usize,
+    tokens: &[usize],
+) -> (f32, u8) {
+    let mut best = f32::NEG_INFINITY;
+    let mut step = 0u8;
+
+    if s >= prev_start && s <= prev_end {
+        best = prev[s];
+    }
+
+    if s >= 1 {
+        let p = s - 1;
+        if p >= prev_start && p <= prev_end {
+            let cand = prev[p];
+            if cand > best {
+                best = cand;
+                step = 1;
+            }
+        }
+    }
+
+    if s >= 2 && tokens[s] != tokens[s - 2] {
+        let p = s - 2;
+        if p >= prev_start && p <= prev_end {
+            let cand = prev[p];
+            if cand > best {
+                best = cand;
+                step = 2;
+            }
+        }
+    }
+
+    (best, step)
 }

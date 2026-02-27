@@ -16,13 +16,20 @@ clap = { version = "4", features = ["derive", "env"], optional = true }
 claxon = { version = "0.4.3", optional = true }
 textgrid = { version = "0.1.0", optional = true }
 indicatif = { version = "0.17", optional = true }
+
 ort = { version = "2.0.0-rc.11", default-features = false, features = ["std", "ndarray", "load-dynamic", "download-binaries", "copy-dylibs", "tls-native"], optional = true }
+wgpu = { version = "24", optional = true }
+pollster = { version = "0.4", optional = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+cudarc = { version = "0.16", features = ["nvrtc"], optional = true }
 
 [features]
 default = []
-cuda = ["candle-core/cuda"]
 report-cli = ["dep:chrono", "dep:clap", "dep:claxon", "dep:textgrid", "dep:indicatif"]
 onnx = ["dep:ort"]
+gpu-dp = ["wgpu", "pollster", "bytemuck"]
+cuda-dp = ["cudarc"]
+full-gpu = ["onnx", "gpu-dp"]
 
 [[bin]]
 name = "alignment_report"

@@ -51,6 +51,10 @@ pub trait RuntimeBackend: Send + Sync {
 pub struct ProfiledWordGrouping {
     pub words: Vec<WordTiming>,
     pub conf_ms: f64,
+    /// Time spent walking the Viterbi path and collecting raw word boundaries.
+    pub collect_ms: f64,
+    /// Time spent cloning candidates, expanding blanks, and selecting the best policy.
+    pub expand_select_ms: f64,
 }
 
 pub trait Tokenizer: Send + Sync {
@@ -101,6 +105,8 @@ pub trait WordGrouper: Send + Sync {
                 stride_ms,
             ),
             conf_ms: 0.0,
+            collect_ms: 0.0,
+            expand_select_ms: 0.0,
         }
     }
 }

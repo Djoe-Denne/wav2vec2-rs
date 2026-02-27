@@ -173,7 +173,6 @@ struct ScalingSample {
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("alignment_report failed: {err}");
         std::process::exit(1);
     }
 }
@@ -187,23 +186,9 @@ fn run() -> Result<(), String> {
     if args.perf_repeats == 0 {
         return Err("--perf-repeats must be >= 1.".to_string());
     }
-    if args.perf_out.is_none()
-        && (args.perf_append
-            || args.perf_warmup != 10
-            || args.perf_repeats != 30
-            || args.perf_aggregate != PerfAggregate::Median
-            || args.perf_scaling_report)
-    {
-        eprintln!("warning: perf flags are ignored unless --perf-out is set");
-    }
     let out_path = match args.output_format {
         OutputFormat::Json => Some(resolve_out_path(&repo_root, args.out.as_ref())),
         OutputFormat::TextGrid => {
-            if args.out.is_some() {
-                eprintln!(
-                    "warning: --out is ignored for --output-format=textgrid (files are written alongside each .flac)"
-                );
-            }
             None
         }
     };
@@ -211,9 +196,6 @@ fn run() -> Result<(), String> {
         .perf_out
         .as_ref()
         .map(|path| resolve_path(&repo_root, path));
-    if matches!(args.output_format, OutputFormat::Json) && !args.textgrid_suffix.is_empty() {
-        eprintln!("warning: --textgrid-suffix is ignored for --output-format=json");
-    }
 
     let include_ids = load_case_filter(args.cases_file.as_ref(), &repo_root)?;
     let mut cases = match args.output_format {
@@ -229,13 +211,6 @@ fn run() -> Result<(), String> {
             .cloned()
             .collect::<Vec<_>>();
         missing.sort();
-        if !missing.is_empty() {
-            eprintln!(
-                "warning: {} case id(s) from --cases-file were not found in the dataset (showing up to 10): {}",
-                missing.len(),
-                missing.into_iter().take(10).collect::<Vec<_>>().join(", ")
-            );
-        }
 
         cases.retain(|case| ids.contains(&case.id));
     }

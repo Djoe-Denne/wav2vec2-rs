@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-use crate::alignment::audio_boundaries::{detect_audio_offset_frame, detect_audio_onset_frame};
 use crate::error::AlignmentError;
 use crate::pipeline::traits::{RuntimeBackend, SequenceAligner, Tokenizer, WordGrouper};
 use crate::types::{AlignmentInput, AlignmentOutput};
@@ -116,39 +115,6 @@ impl ForcedAligner {
             self.frame_stride_ms,
         );
 
-        if let Some(onset_frame) =
-            detect_audio_onset_frame(&input.samples, input.sample_rate_hz, self.frame_stride_ms)
-        {
-            if let Some(first_word) = words.first_mut() {
-                let onset_ms = (onset_frame as f64 * self.frame_stride_ms) as u64;
-                tracing::debug!(
-                    onset_frame,
-                    onset_ms,
-                    first_word_start_ms = first_word.start_ms,
-                    "onset detection: adjusting first word start"
-                );
-                if onset_ms < first_word.start_ms {
-                    first_word.start_ms = onset_ms;
-                }
-            }
-        }
-        if let Some(offset_frame) =
-            detect_audio_offset_frame(&input.samples, input.sample_rate_hz, self.frame_stride_ms)
-        {
-            if let Some(last_word) = words.last_mut() {
-                let offset_ms =
-                    ((offset_frame.saturating_add(1)) as f64 * self.frame_stride_ms) as u64;
-                tracing::debug!(
-                    offset_frame,
-                    offset_ms,
-                    last_word_end_ms = last_word.end_ms,
-                    "offset detection: adjusting last word end"
-                );
-                if offset_ms > last_word.end_ms {
-                    last_word.end_ms = offset_ms;
-                }
-            }
-        }
         Ok(AlignmentOutput { words })
     }
 
@@ -268,48 +234,13 @@ impl ForcedAligner {
         );
         let group_total_ms = duration_to_ms(group_started.elapsed());
         let conf_ms = profiled_grouping.conf_ms.max(0.0);
-        let mut words = profiled_grouping.words;
+        let words = profiled_grouping.words;
         let group_words_only_ms = (group_total_ms - conf_ms).max(0.0);
 
-        let boundary_started = Instant::now();
-        if let Some(onset_frame) =
-            detect_audio_onset_frame(&input.samples, input.sample_rate_hz, self.frame_stride_ms)
-        {
-            if let Some(first_word) = words.first_mut() {
-                let onset_ms = (onset_frame as f64 * self.frame_stride_ms) as u64;
-                tracing::debug!(
-                    onset_frame,
-                    onset_ms,
-                    first_word_start_ms = first_word.start_ms,
-                    "onset detection: adjusting first word start"
-                );
-                if onset_ms < first_word.start_ms {
-                    first_word.start_ms = onset_ms;
-                }
-            }
-        }
-        if let Some(offset_frame) =
-            detect_audio_offset_frame(&input.samples, input.sample_rate_hz, self.frame_stride_ms)
-        {
-            if let Some(last_word) = words.last_mut() {
-                let offset_ms =
-                    ((offset_frame.saturating_add(1)) as f64 * self.frame_stride_ms) as u64;
-                tracing::debug!(
-                    offset_frame,
-                    offset_ms,
-                    last_word_end_ms = last_word.end_ms,
-                    "offset detection: adjusting last word end"
-                );
-                if offset_ms > last_word.end_ms {
-                    last_word.end_ms = offset_ms;
-                }
-            }
-        }
-        let boundary_ms = duration_to_ms(boundary_started.elapsed());
         self.runtime_backend
             .synchronize("runtime synchronize after align timing")?;
         let align_elapsed_ms = duration_to_ms(align_started.elapsed());
-        let mut group_ms = tokenization_ms + group_words_only_ms + boundary_ms;
+        let mut group_ms = tokenization_ms + group_words_only_ms;
         let residual = align_elapsed_ms - (dp_ms + conf_ms + group_ms);
         if residual.abs() > 1e-9 {
             group_ms = (group_ms + residual).max(0.0);
