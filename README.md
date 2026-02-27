@@ -46,6 +46,7 @@ let aligner = ForcedAlignerBuilder::new(config)
 Notes:
 
 - ONNX support is behind the `onnx` feature: build with `--features onnx`.
+- ⚠️ **ONNX Runtime with CUDA**: To use the ONNX runtime with CUDA, you need CUDA 12.8 or 13.1 and cuDNN 9+ installed and on your PATH.
 - Candle keeps working as before (and remains the default path).
 - `model_path` points to runtime-specific weights:
   - Candle: `model.safetensors`
@@ -499,11 +500,17 @@ cargo run --features "report-cli,cuda" --bin alignment_report -- \
 - For `--output-format=textgrid`: transcript files (`*.trans.txt`) + sibling
   FLAC files
 
+`alignment_report` runtime default:
+
+- with `--features onnx`: defaults to `--runtime onnx`
+- without `--features onnx`: defaults to `--runtime candle`
+
 ### CLI options
 
 - `--model-dir <PATH>`: model directory (default: `models/wav2vec2-base-960h`)
 - `--dataset-root <PATH>`: dataset root (default: `test-data`)
 - `--cases-file <PATH>`: optional case list file
+- `--runtime <onnx|candle>`: inference runtime backend (default depends on enabled features)
 - `--output-format <json|textgrid>`: output mode (default: `json`)
 - `--textgrid-suffix <STRING>`: suffix appended before `.TextGrid` in textgrid
   mode (default: empty)
@@ -526,6 +533,7 @@ Each CLI option can be configured through an environment variable:
 - `WAV2VEC2_REPORT_MODEL_DIR` -> `--model-dir`
 - `WAV2VEC2_REPORT_DATASET_ROOT` -> `--dataset-root`
 - `WAV2VEC2_REPORT_CASES_FILE` -> `--cases-file`
+- `WAV2VEC2_REPORT_RUNTIME` -> `--runtime`
 - `WAV2VEC2_REPORT_FORMAT` -> `--output-format`
 - `WAV2VEC2_REPORT_TEXTGRID_SUFFIX` -> `--textgrid-suffix`
 - `WAV2VEC2_REPORT_OUT` -> `--out`

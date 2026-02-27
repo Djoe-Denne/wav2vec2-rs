@@ -16,7 +16,7 @@ clap = { version = "4", features = ["derive", "env"], optional = true }
 claxon = { version = "0.4.3", optional = true }
 textgrid = { version = "0.1.0", optional = true }
 indicatif = { version = "0.17", optional = true }
-ort = { version = "2.0.0-rc.11", default-features = false, features = ["std", "ndarray", "load-dynamic"], optional = true }
+ort = { version = "2.0.0-rc.11", default-features = false, features = ["std", "ndarray", "load-dynamic", "download-binaries", "copy-dylibs", "tls-native"], optional = true }
 
 [features]
 default = []

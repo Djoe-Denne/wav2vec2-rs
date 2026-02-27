@@ -10,7 +10,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use textgrid::{TextGrid, TierType};
 use wav2vec2_rs::{
     aggregate_reports, attach_outlier_traces, compute_sentence_report, infer_split, AlignmentInput,
-    ForcedAligner, ForcedAlignerBuilder, Meta, ReferenceWord, Report, SentenceReport,
+    ForcedAligner, ForcedAlignerBuilder, Meta, ReferenceWord, Report, RuntimeKind, SentenceReport,
     Wav2Vec2Config, WordTiming,
 };
 
@@ -46,6 +46,47 @@ impl PerfAggregate {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum RuntimeChoice {
+    Onnx,
+    Candle,
+}
+
+impl RuntimeChoice {
+    fn model_filename(self) -> &'static str {
+        match self {
+            Self::Onnx => "model.onnx",
+            Self::Candle => "model.safetensors",
+        }
+    }
+
+    fn runtime_kind(self) -> RuntimeKind {
+        match self {
+            Self::Onnx => RuntimeKind::Onnx,
+            Self::Candle => RuntimeKind::Candle,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Onnx => "onnx",
+            Self::Candle => "candle",
+        }
+    }
+}
+
+fn default_runtime_choice() -> RuntimeChoice {
+    #[cfg(feature = "onnx")]
+    {
+        RuntimeChoice::Onnx
+    }
+
+    #[cfg(not(feature = "onnx"))]
+    {
+        RuntimeChoice::Candle
+    }
+}
+
 #[derive(Debug, Parser)]
 #[command(name = "alignment_report")]
 #[command(about = "Generate deterministic forced-alignment quality reports")]
@@ -53,7 +94,7 @@ struct Args {
     #[arg(
         long,
         env = "WAV2VEC2_REPORT_MODEL_DIR",
-        default_value = "models/wav2vec2-base-960h"
+        default_value = "models/onnx_wav2vec2_base_960h"
     )]
     model_dir: PathBuf,
     #[arg(
@@ -72,6 +113,13 @@ struct Args {
     offset: usize,
     #[arg(long, env = "WAV2VEC2_REPORT_DEVICE", default_value = "cpu")]
     device: String,
+    #[arg(
+        long,
+        env = "WAV2VEC2_REPORT_RUNTIME",
+        value_enum,
+        default_value_t = default_runtime_choice()
+    )]
+    runtime: RuntimeChoice,
     #[arg(
         long,
         env = "WAV2VEC2_REPORT_FORMAT",
@@ -204,7 +252,7 @@ fn run() -> Result<(), String> {
     }
     let selected_case_count = cases.len();
 
-    let aligner = build_aligner(&model_dir, &args.device)?;
+    let aligner = build_aligner(&model_dir, &args.device, args.runtime)?;
     let frame_stride_ms = aligner.frame_stride_ms();
     if !frame_stride_ms.is_finite() {
         return Err(format!(
@@ -550,10 +598,24 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn build_aligner(model_dir: &Path, device: &str) -> Result<ForcedAligner, String> {
+fn build_aligner(
+    model_dir: &Path,
+    device: &str,
+    runtime: RuntimeChoice,
+) -> Result<ForcedAligner, String> {
+    if runtime == RuntimeChoice::Onnx && !cfg!(feature = "onnx") {
+        return Err(
+            "runtime=onnx requested but this binary was built without ONNX support. Rebuild with `--features \"report-cli,onnx\"`."
+                .to_string(),
+        );
+    }
+    let model_filename = runtime.model_filename();
     require_path_exists(
-        &model_dir.join("model.safetensors"),
-        "Missing model weights (model.safetensors).",
+        &model_dir.join(model_filename),
+        &format!(
+            "Missing model weights ({model_filename}) for runtime='{}'.",
+            runtime.as_str()
+        ),
     )?;
     require_path_exists(
         &model_dir.join("config.json"),
@@ -566,7 +628,7 @@ fn build_aligner(model_dir: &Path, device: &str) -> Result<ForcedAligner, String
 
     let config = Wav2Vec2Config {
         model_path: model_dir
-            .join("model.safetensors")
+            .join(model_filename)
             .to_string_lossy()
             .into_owned(),
         config_path: model_dir.join("config.json").to_string_lossy().into_owned(),
@@ -575,6 +637,7 @@ fn build_aligner(model_dir: &Path, device: &str) -> Result<ForcedAligner, String
         expected_sample_rate_hz: Wav2Vec2Config::DEFAULT_SAMPLE_RATE_HZ,
     };
     ForcedAlignerBuilder::new(config)
+        .with_runtime_kind(runtime.runtime_kind())
         .build()
         .map_err(|err| format!("Failed to build ForcedAligner: {err}"))
 }
