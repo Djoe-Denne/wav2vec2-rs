@@ -386,10 +386,10 @@ python scripts/wav2vec2aligner_librispeech_textgrids.py `
   --perf-aggregate median
 ```
 
-Rust bin perf mode (Bash):
+Rust bin perf mode (Bash). Requires `alignment-profiling` feature; perf args are only present when this feature is enabled:
 
 ```bash
-cargo run --features "report-cli,cuda" --bin alignment_report -- \
+cargo run --features "report-cli,cuda,alignment-profiling" --bin alignment_report -- \
   --dataset-root test-data \
   --output-format textgrid \
   --device cuda \
@@ -402,7 +402,7 @@ cargo run --features "report-cli,cuda" --bin alignment_report -- \
 Rust bin perf append mode (JSONL + summary) (PowerShell):
 
 ```powershell
-cargo run --features "report-cli,cuda" --bin alignment_report -- `
+cargo run --features "report-cli,cuda,alignment-profiling" --bin alignment_report -- `
   --dataset-root .\test-data `
   --output-format textgrid `
   --device cuda `
@@ -520,7 +520,7 @@ cargo run --features "report-cli,cuda" --bin alignment_report -- \
 - `--limit <N>`: max selected cases
 - `--offset <N>`: skip first N selected cases
 - `--device <cpu|cuda>`: runtime device (default: `cpu`)
-- `--perf-out <PATH>`: optional perf report path (JSON or JSONL with `--perf-append`)
+- `--perf-out <PATH>`: optional perf report path (JSON or JSONL with `--perf-append`). **Only available when built with `alignment-profiling` feature** (`cargo run --features "report-cli,alignment-profiling"`).
 - `--perf-warmup <N>`: warm-up iterations on first measured utterance only (default: `10`)
 - `--perf-repeats <N>`: measured repeats per utterance (default: `30`)
 - `--perf-aggregate <median|mean>`: repeat aggregation mode (default: `median`)

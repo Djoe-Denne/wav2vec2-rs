@@ -1,5 +1,7 @@
 use crate::types::{WordConfidenceStats, WordTiming};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(feature = "alignment-profiling")]
+use std::time::Instant;
 
 mod blank_expansion;
 mod candidate_selector;
@@ -60,18 +62,18 @@ pub fn group_into_words_profiled(
     stride_ms: f64,
 ) -> ProfiledWordGroupingOutput {
     // --- Block 1: collect raw words from Viterbi path ---
-    let collect_started = Instant::now();
-    let profiled_raw = path_to_words::collect_profiled(
-        path,
-        tokens,
-        chars,
-        expected_words,
-        log_probs,
-        blank_id,
-        word_sep_id,
-        stride_ms,
-    );
-    let collect_ms = duration_to_ms(collect_started.elapsed());
+    let (profiled_raw, collect_ms) = measure(|| {
+        path_to_words::collect_profiled(
+            path,
+            tokens,
+            chars,
+            expected_words,
+            log_probs,
+            blank_id,
+            word_sep_id,
+            stride_ms,
+        )
+    });
 
     let raw = profiled_raw.words;
     if raw.is_empty() {
@@ -84,19 +86,18 @@ pub fn group_into_words_profiled(
     }
 
     // --- Block 2: expand + select best candidate ---
-    let expand_select_started = Instant::now();
-    let first_frame = path.first().map(|&(_, f)| f).unwrap_or(0);
-    let last_frame = path.last().map(|&(_, f)| f).unwrap_or(0);
-    let mut candidates = Vec::with_capacity(blank_expansion::ExpansionPolicy::ALL.len());
-    for policy in blank_expansion::ExpansionPolicy::ALL {
-        candidates.push((
-            policy,
-            blank_expansion::expand_with_policy(raw.clone(), first_frame, last_frame, policy),
-        ));
-    }
+    let ((selected_policy, expanded, selected_score), expand_select_ms) = measure(|| {
+        let first_frame = path.first().map(|&(_, f)| f).unwrap_or(0);
+        let last_frame = path.last().map(|&(_, f)| f).unwrap_or(0);
+        let mut candidates = Vec::with_capacity(blank_expansion::ExpansionPolicy::ALL.len());
+        for policy in blank_expansion::ExpansionPolicy::ALL {
+            candidates.push((
+                policy,
+                blank_expansion::expand_with_policy(raw.clone(), first_frame, last_frame, policy),
+            ));
+        }
 
-    let (selected_policy, expanded, selected_score) =
-        match candidate_selector::select_best(&raw, candidates, log_probs, blank_id) {
+        let result = match candidate_selector::select_best(&raw, candidates, log_probs, blank_id) {
             Some(chosen) => (chosen.policy, chosen.words, Some(chosen.score)),
             None => (
                 blank_expansion::ExpansionPolicy::Balanced,
@@ -104,7 +105,8 @@ pub fn group_into_words_profiled(
                 None,
             ),
         };
-    let expand_select_ms = duration_to_ms(expand_select_started.elapsed());
+        result
+    });
 
     if let Some(score) = selected_score {
         tracing::debug!(
@@ -118,37 +120,37 @@ pub fn group_into_words_profiled(
     }
 
     // --- Block 3: confidence scoring ---
-    let conf_started = Instant::now();
-    let words = expanded
-        .into_iter()
-        .map(|mut w| {
-            // Timing contract: [start_ms, end_ms), start inclusive and end exclusive.
-            let start_ms = (w.start_frame as f64 * stride_ms) as u64;
-            let end_ms = ((w.end_frame + 1) as f64 * stride_ms) as u64;
-            let quality_confidence = quality_confidence_score(&w.confidence_stats);
-            let calibrated_confidence = quality_confidence.map(calibrate_quality_confidence);
-            w.confidence_stats.quality_confidence = quality_confidence;
-            w.confidence_stats.calibrated_confidence = calibrated_confidence;
-            tracing::debug!(
-                word = w.word.as_str(),
-                start_frame = w.start_frame,
-                end_frame = w.end_frame,
-                start_ms,
-                end_ms,
-                quality_confidence = quality_confidence,
-                calibrated_confidence = calibrated_confidence,
-                "grouping: final word boundary (after blank expansion)"
-            );
-            WordTiming {
-                word: w.word,
-                start_ms,
-                end_ms,
-                confidence: calibrated_confidence,
-                confidence_stats: w.confidence_stats,
-            }
-        })
-        .collect();
-    let conf_ms = duration_to_ms(conf_started.elapsed());
+    let (words, conf_ms) = measure(|| {
+        expanded
+            .into_iter()
+            .map(|mut w| {
+                // Timing contract: [start_ms, end_ms), start inclusive and end exclusive.
+                let start_ms = (w.start_frame as f64 * stride_ms) as u64;
+                let end_ms = ((w.end_frame + 1) as f64 * stride_ms) as u64;
+                let quality_confidence = quality_confidence_score(&w.confidence_stats);
+                let calibrated_confidence = quality_confidence.map(calibrate_quality_confidence);
+                w.confidence_stats.quality_confidence = quality_confidence;
+                w.confidence_stats.calibrated_confidence = calibrated_confidence;
+                tracing::debug!(
+                    word = w.word.as_str(),
+                    start_frame = w.start_frame,
+                    end_frame = w.end_frame,
+                    start_ms,
+                    end_ms,
+                    quality_confidence = quality_confidence,
+                    calibrated_confidence = calibrated_confidence,
+                    "grouping: final word boundary (after blank expansion)"
+                );
+                WordTiming {
+                    word: w.word,
+                    start_ms,
+                    end_ms,
+                    confidence: calibrated_confidence,
+                    confidence_stats: w.confidence_stats,
+                }
+            })
+            .collect::<Vec<_>>()
+    });
 
     ProfiledWordGroupingOutput {
         words,
@@ -223,6 +225,18 @@ fn calibrate_quality_confidence(score: f32) -> f32 {
     0.99
 }
 
-fn duration_to_ms(duration: Duration) -> f64 {
-    duration.as_secs_f64() * 1000.0
+/// When `alignment-profiling` is enabled: runs `f` and returns `(result, elapsed_ms)`.
+/// When disabled: runs `f` and returns `(result, 0.0)`. No Instant/elapsed calls;
+/// the compiler optimizes this to a plain `f()` with no timing overhead.
+#[cfg(feature = "alignment-profiling")]
+fn measure<T>(f: impl FnOnce() -> T) -> (T, f64) {
+    let start = Instant::now();
+    let result = f();
+    (result, start.elapsed().as_secs_f64() * 1000.0)
+}
+
+#[cfg(not(feature = "alignment-profiling"))]
+#[inline(always)]
+fn measure<T>(f: impl FnOnce() -> T) -> (T, f64) {
+    (f(), 0.0)
 }

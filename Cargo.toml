@@ -25,6 +25,9 @@ cudarc = { version = "0.19.3", features = ["nvrtc", "cuda-version-from-build-sys
 
 [features]
 default = []
+# Enables Instant-based timing in group_into_words_profiled. When disabled, timing
+# calls are no-ops optimized away, so align() has zero profiling overhead.
+alignment-profiling = []
 report-cli = ["dep:chrono", "dep:clap", "dep:claxon", "dep:textgrid", "dep:indicatif"]
 onnx = ["dep:ort"]
 gpu-dp = ["wgpu", "pollster", "bytemuck"]
@@ -34,4 +37,5 @@ full-gpu = ["onnx", "gpu-dp"]
 [[bin]]
 name = "alignment_report"
 path = "src/bin/alignment_report.rs"
+# alignment-profiling enables Instant-based timing for --perf-out; omit for zero overhead.
 required-features = ["report-cli"]
