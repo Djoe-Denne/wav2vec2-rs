@@ -22,12 +22,14 @@ wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 cudarc = { version = "0.19.3", features = ["nvrtc", "cuda-version-from-build-system"], optional = true }
+libc = { version = "0.2", optional = true }
+windows-sys = { version = "0.52", optional = true, features = ["Win32_System_ProcessStatus", "Win32_Foundation", "Win32_System_Threading"] }
 
 [features]
 default = []
 # Enables Instant-based timing in group_into_words_profiled. When disabled, timing
 # calls are no-ops optimized away, so align() has zero profiling overhead.
-alignment-profiling = []
+alignment-profiling = ["dep:libc", "dep:windows-sys"]
 report-cli = ["dep:chrono", "dep:clap", "dep:claxon", "dep:textgrid", "dep:indicatif"]
 onnx = ["dep:ort"]
 gpu-dp = ["wgpu", "pollster", "bytemuck"]

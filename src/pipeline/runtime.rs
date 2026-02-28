@@ -7,6 +7,9 @@ use crate::pipeline::traits::{
 };
 use crate::types::{AlignmentInput, AlignmentOutput};
 
+#[cfg(feature = "alignment-profiling")]
+use crate::pipeline::memory_tracker::{MemoryTracker, StageMemory, StageMemoryMap};
+
 pub struct ForcedAligner {
     runtime_backend: Box<dyn RuntimeBackend>,
     vocab: HashMap<char, usize>,
@@ -272,6 +275,192 @@ impl ForcedAligner {
             device: self.runtime_backend.device_label(),
             frame_stride_ms: self.frame_stride_ms,
         })
+    }
+
+    /// Like `align_profiled` but also records per-stage peak memory (CPU RSS + optional GPU).
+    /// Intended for benchmark mode only; use on first repeat to avoid overhead on every run.
+    #[cfg(feature = "alignment-profiling")]
+    pub fn align_profiled_with_memory(
+        &self,
+        input: &AlignmentInput,
+        tracker: &mut MemoryTracker,
+    ) -> Result<(ProfiledAlignmentOutput, StageMemoryMap), AlignmentError> {
+        let sync = || self.runtime_backend.synchronize("memory profiling sync");
+
+        if input.samples.is_empty() || input.transcript.trim().is_empty() {
+            return Ok((
+                ProfiledAlignmentOutput {
+                    output: AlignmentOutput { words: Vec::new() },
+                    timings: AlignmentStageTimings {
+                        forward_ms: 0.0,
+                        post_ms: 0.0,
+                        dp_ms: 0.0,
+                        group_ms: 0.0,
+                        conf_ms: 0.0,
+                        align_ms: 0.0,
+                        total_ms: 0.0,
+                    },
+                    num_frames_t: 0,
+                    state_len: 0,
+                    ts_product: 0,
+                    vocab_size: self.vocab.len(),
+                    dtype: "f32".to_string(),
+                    device: self.runtime_backend.device_label(),
+                    frame_stride_ms: self.frame_stride_ms,
+                },
+                StageMemoryMap::default(),
+            ));
+        }
+
+        if input.sample_rate_hz != self.expected_sample_rate_hz {
+            tracing::warn!(
+                expected_rate_hz = self.expected_sample_rate_hz,
+                actual_rate_hz = input.sample_rate_hz,
+                "wav2vec2 aligner expects a specific sample rate; quality may degrade"
+            );
+        }
+
+        sync()?;
+        let total_started = Instant::now();
+
+        let normalized = normalize_audio(&input.samples);
+        let (profiled_runtime, mem_forward) = tracker.measure(
+            "forward",
+            sync,
+            || self.runtime_backend.infer_profiled(&normalized),
+        )?;
+        let forward_ms = profiled_runtime.forward_ms;
+        let post_ms = profiled_runtime.post_ms;
+        let forward_output = profiled_runtime.forward_output;
+        let (num_frames_t, vocab_size, dtype) = forward_output.metadata();
+        // Forward and post are measured together in infer_profiled.
+        let mem_post = mem_forward;
+
+        sync()?;
+        let align_started = Instant::now();
+        let tokenize_started = Instant::now();
+        let token_sequence = self.tokenizer.tokenize(
+            &input.transcript,
+            &self.vocab,
+            self.blank_id,
+            self.word_sep_id,
+        );
+        let tokenization_ms = duration_to_ms(tokenize_started.elapsed());
+        let state_len = token_sequence.tokens.len();
+        let ts_product = (num_frames_t as u64).saturating_mul(state_len as u64);
+
+        if token_sequence.tokens.is_empty() {
+            sync()?;
+            let align_ms = duration_to_ms(align_started.elapsed());
+            sync()?;
+            let total_ms = duration_to_ms(total_started.elapsed());
+            return Ok((
+                ProfiledAlignmentOutput {
+                    output: AlignmentOutput { words: Vec::new() },
+                    timings: AlignmentStageTimings {
+                        forward_ms,
+                        post_ms,
+                        dp_ms: 0.0,
+                        group_ms: align_ms,
+                        conf_ms: 0.0,
+                        align_ms,
+                        total_ms,
+                    },
+                    num_frames_t,
+                    state_len,
+                    ts_product,
+                    vocab_size,
+                    dtype,
+                    device: self.runtime_backend.device_label(),
+                    frame_stride_ms: self.frame_stride_ms,
+                },
+                StageMemoryMap {
+                    forward: mem_forward,
+                    post: mem_post,
+                    dp: StageMemory::default(),
+                    group: StageMemory::default(),
+                    conf: StageMemory::default(),
+                },
+            ));
+        }
+
+        let t_len = num_frames_t;
+        let min_frames = (token_sequence.tokens.len() + 1) / 2;
+        if t_len < min_frames {
+            return Err(AlignmentError::invalid_input(format!(
+                "audio too short for transcript: {t_len} frames < {min_frames} required"
+            )));
+        }
+
+        let dp_started = Instant::now();
+        let (path, log_probs, mem_dp) = {
+            let (result, mem) = tracker.measure("dp", sync, || {
+                dispatch_viterbi(
+                    self.sequence_aligner.as_ref(),
+                    forward_output,
+                    &token_sequence.tokens,
+                )
+            })?;
+            (result.0, result.1, mem)
+        };
+        let dp_ms = duration_to_ms(dp_started.elapsed());
+
+        let group_started = Instant::now();
+        let (profiled_grouping, mem_group) = tracker.measure("group", sync, || {
+            Ok(self.word_grouper.group_words_profiled(
+                &path,
+                &token_sequence,
+                &log_probs,
+                self.blank_id,
+                self.word_sep_id,
+                self.frame_stride_ms,
+            ))
+        })?;
+        let group_total_ms = duration_to_ms(group_started.elapsed());
+        let conf_ms = profiled_grouping.conf_ms.max(0.0);
+        let words = profiled_grouping.words;
+        let group_words_only_ms = (group_total_ms - conf_ms).max(0.0);
+        let mem_conf = mem_group;
+
+        sync()?;
+        let align_elapsed_ms = duration_to_ms(align_started.elapsed());
+        let mut group_ms = tokenization_ms + group_words_only_ms;
+        let residual = align_elapsed_ms - (dp_ms + conf_ms + group_ms);
+        if residual.abs() > 1e-9 {
+            group_ms = (group_ms + residual).max(0.0);
+        }
+        let align_ms = dp_ms + conf_ms + group_ms;
+        sync()?;
+        let total_ms = duration_to_ms(total_started.elapsed());
+
+        Ok((
+            ProfiledAlignmentOutput {
+                output: AlignmentOutput { words },
+                timings: AlignmentStageTimings {
+                    forward_ms,
+                    post_ms,
+                    dp_ms,
+                    group_ms,
+                    conf_ms,
+                    align_ms,
+                    total_ms,
+                },
+                num_frames_t,
+                state_len,
+                ts_product,
+                vocab_size,
+                dtype,
+                device: self.runtime_backend.device_label(),
+                frame_stride_ms: self.frame_stride_ms,
+            },
+            StageMemoryMap {
+                forward: mem_forward,
+                post: mem_post,
+                dp: mem_dp,
+                group: mem_group,
+                conf: mem_conf,
+            },
+        ))
     }
 
     pub fn frame_stride_ms(&self) -> f64 {

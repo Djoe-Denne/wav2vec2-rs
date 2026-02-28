@@ -8,6 +8,24 @@ use serde::Serialize;
 const PERF_SCHEMA_VERSION: u32 = 1;
 const JSONL_FLUSH_EVERY: usize = 32;
 
+/// Per-stage memory in bytes (CPU RSS, GPU allocated, GPU reserved).
+#[derive(Debug, Clone, Serialize)]
+pub struct StageMemoryBytes {
+    pub cpu: u64,
+    pub gpu_alloc: u64,
+    pub gpu_reserved: u64,
+}
+
+/// Peak memory per pipeline stage for one run; all values in bytes.
+#[derive(Debug, Clone, Serialize)]
+pub struct StageMemoryPerRun {
+    pub forward: StageMemoryBytes,
+    pub post: StageMemoryBytes,
+    pub dp: StageMemoryBytes,
+    pub group: StageMemoryBytes,
+    pub conf: StageMemoryBytes,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct PerfRunConfig {
     pub warmup: usize,
@@ -47,6 +65,9 @@ pub struct PerfUtteranceRecord {
     pub conf_ms_repeats: Vec<f64>,
     pub align_ms_repeats: Vec<f64>,
     pub total_ms_repeats: Vec<f64>,
+    /// Per-stage peak memory (bytes); present only when benchmark ran with memory profiling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<StageMemoryPerRun>,
 }
 
 #[derive(Debug, Clone, Serialize)]

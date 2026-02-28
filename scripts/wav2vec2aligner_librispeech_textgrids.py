@@ -274,7 +274,12 @@ def main() -> int:
     ensure_aligner_importable()
 
     import aligner.heavy as heavy
-    from aligner.heavy import align_speech_file, align_speech_file_profiled, load_model
+    from aligner.heavy import (
+    align_speech_file,
+    align_speech_file_profiled,
+    collect_per_stage_memory,
+    load_model,
+)
     from aligner.utils import TextHash, create_text_grid_from_segments, create_transducer
 
     dataset_root = args.dataset_root
@@ -428,6 +433,15 @@ def main() -> int:
                     total_ms = aggregate_measurements(total_ms_repeats, args.perf_aggregate)
                     lib_work_elapsed_s += total_ms / 1000.0
 
+                    memory_result = collect_per_stage_memory(
+                        wav,
+                        build_text_hash(),
+                        model,
+                        labels,
+                        args.word_padding,
+                        args.sentence_padding,
+                    )
+
                     duration_ms = (
                         int((wav.size(1) * 1000) / args.sample_rate)
                         if args.sample_rate > 0
@@ -458,6 +472,7 @@ def main() -> int:
                         "post_ms_repeats": post_ms_repeats,
                         "align_ms_repeats": align_ms_repeats,
                         "total_ms_repeats": total_ms_repeats,
+                        "memory": memory_result,
                     }
                     perf_forward_samples.append(forward_ms)
                     perf_post_samples.append(post_ms)

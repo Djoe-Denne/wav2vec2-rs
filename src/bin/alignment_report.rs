@@ -19,8 +19,31 @@ mod json_report_formatter;
 #[cfg(feature = "alignment-profiling")]
 #[path = "alignment_report/perf_report_formatter.rs"]
 mod perf_report_formatter;
+#[cfg(feature = "alignment-profiling")]
+use wav2vec2_rs::pipeline::memory_tracker::{MemoryTracker, StageMemoryMap};
 #[path = "alignment_report/text_grid_report_formatter.rs"]
 mod text_grid_report_formatter;
+
+#[cfg(feature = "alignment-profiling")]
+fn stage_memory_map_to_per_run(
+    m: &StageMemoryMap,
+) -> perf_report_formatter::StageMemoryPerRun {
+    use perf_report_formatter::{StageMemoryBytes, StageMemoryPerRun};
+    fn to_bytes(s: &wav2vec2_rs::pipeline::memory_tracker::StageMemory) -> StageMemoryBytes {
+        StageMemoryBytes {
+            cpu: s.peak_cpu_rss_bytes,
+            gpu_alloc: s.peak_gpu_allocated_bytes,
+            gpu_reserved: s.peak_gpu_reserved_bytes,
+        }
+    }
+    StageMemoryPerRun {
+        forward: to_bytes(&m.forward),
+        post: to_bytes(&m.post),
+        dp: to_bytes(&m.dp),
+        group: to_bytes(&m.group),
+        conf: to_bytes(&m.conf),
+    }
+}
 
 const LIBRISPEECH_SUBSETS: [&str; 2] = ["test-clean", "test-other"];
 const OUTLIER_TRACE_TOP_N: usize = 20;
@@ -361,11 +384,26 @@ fn run() -> Result<(), String> {
                 let mut selected_vocab_size = 0usize;
                 let mut selected_dtype = String::new();
                 let mut selected_device = String::new();
+                let mut memory_map: Option<StageMemoryMap> = None;
+                let gpu_reader = if args.device.eq_ignore_ascii_case("cuda") {
+                    wav2vec2_rs::pipeline::memory_tracker::cuda_gpu_reader()
+                } else {
+                    None
+                };
+                let mut tracker = MemoryTracker::new(gpu_reader);
 
                 for repeat_idx in 0..args.perf_repeats {
-                    let profiled = aligner
-                        .align_profiled(&alignment_input)
-                        .map_err(|err| format!("{}: perf align() failed: {err}", case.id))?;
+                    let profiled = if repeat_idx == 0 {
+                        let (prof, mem) = aligner
+                            .align_profiled_with_memory(&alignment_input, &mut tracker)
+                            .map_err(|err| format!("{}: perf align_with_memory() failed: {err}", case.id))?;
+                        memory_map = Some(mem);
+                        prof
+                    } else {
+                        aligner
+                            .align_profiled(&alignment_input)
+                            .map_err(|err| format!("{}: perf align() failed: {err}", case.id))?
+                    };
                     let timings = profiled.timings;
                     forward_ms_repeats.push(timings.forward_ms);
                     post_ms_repeats.push(timings.post_ms);
@@ -436,6 +474,7 @@ fn run() -> Result<(), String> {
                     conf_ms_repeats,
                     align_ms_repeats,
                     total_ms_repeats,
+                    memory: memory_map.as_ref().map(stage_memory_map_to_per_run),
                 };
 
                 perf_forward_samples.push(record.forward_ms);
