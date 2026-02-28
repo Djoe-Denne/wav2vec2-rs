@@ -31,6 +31,21 @@ fn get_ctx() -> Option<&'static CudaViterbiCtx> {
     .as_ref()
 }
 
+/// Synchronize the CUDA device so that all prior GPU work (e.g. ORT inference)
+/// is complete. Used by OnnxRuntimeBackend so that forward_ms and dp_ms are
+/// attributed correctly in profiling.
+pub fn synchronize_cuda_device(context: &'static str) -> Result<(), crate::error::AlignmentError> {
+    let ctx = get_ctx()
+        .ok_or_else(|| crate::error::AlignmentError::runtime(context, "CUDA context not available"))?;
+    ctx.ctx
+        .set_blocking_synchronize()
+        .map_err(|e| crate::error::AlignmentError::runtime(context, e))?;
+    ctx.ctx
+        .synchronize()
+        .map_err(|e| crate::error::AlignmentError::runtime(context, e))?;
+    Ok(())
+}
+
 /// Run log_softmax over rows: logits [T,V] -> log_probs [T,V] on device.
 /// Returns (context, log_probs_slice) for use in CudaLogProbsBuffer.
 ///
