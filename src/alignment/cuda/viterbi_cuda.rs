@@ -31,21 +31,6 @@ fn get_ctx() -> Option<&'static CudaViterbiCtx> {
     .as_ref()
 }
 
-/// Synchronize the CUDA device so that all prior GPU work (e.g. ORT inference)
-/// is complete. Used by OnnxRuntimeBackend so that forward_ms and dp_ms are
-/// attributed correctly in profiling.
-pub fn synchronize_cuda_device(context: &'static str) -> Result<(), crate::error::AlignmentError> {
-    let ctx = get_ctx()
-        .ok_or_else(|| crate::error::AlignmentError::runtime(context, "CUDA context not available"))?;
-    ctx.ctx
-        .set_blocking_synchronize()
-        .map_err(|e| crate::error::AlignmentError::runtime(context, e))?;
-    ctx.ctx
-        .synchronize()
-        .map_err(|e| crate::error::AlignmentError::runtime(context, e))?;
-    Ok(())
-}
-
 /// Run log_softmax over rows: logits [T,V] -> log_probs [T,V] on device.
 /// Returns (context, log_probs_slice) for use in CudaLogProbsBuffer.
 ///
@@ -115,31 +100,32 @@ pub unsafe fn forced_align_viterbi_cuda_zerocopy(
         return Some(Vec::new());
     }
 
-    let func: CudaFunction = ctx.module.load_function("viterbi_forward").ok()?;
+    let func_fwd: CudaFunction = ctx.module.load_function("viterbi_forward").ok()?;
+    let func_bt: CudaFunction = ctx.module.load_function("viterbi_backtrace").ok()?;
 
     // Upload tokens (small: S × 4 bytes, typically < 2KB)
     let tokens_i32: Vec<i32> = tokens.iter().map(|&t| t as i32).collect();
     let tokens_dev: CudaSlice<i32> = stream.clone_htod(&tokens_i32).ok()?;
 
-    // Allocate device buffers for outputs
+    // Allocate device buffers: bp and out stay on GPU; only path is read back (T × 4 bytes)
     let bp_len = t_len * s_len;
     let mut bp_dev: CudaSlice<i32> = stream.alloc_zeros(bp_len).ok()?;
     let mut out_dev: CudaSlice<f32> = stream.alloc_zeros(2).ok()?;
+    let mut path_dev: CudaSlice<i32> = stream.alloc_zeros(t_len).ok()?;
 
     let final_floor_state = s_len.saturating_sub(2) as i32;
     let shared_mem = (2 * s_len * std::mem::size_of::<f32>()) as u32;
 
-    let cfg = LaunchConfig {
+    let cfg_fwd = LaunchConfig {
         block_dim: (BLOCK_SIZE, 1, 1),
         grid_dim: (1, 1, 1),
         shared_mem_bytes: shared_mem,
     };
 
     let log_probs_cu = log_probs_dev_ptr as cudarc::driver::sys::CUdeviceptr;
-    // Launch — log_probs_dev_ptr is read directly, zero copy!
     unsafe {
         stream
-            .launch_builder(&func)
+            .launch_builder(&func_fwd)
             .arg(&log_probs_cu)
             .arg(&tokens_dev)
             .arg(&mut bp_dev)
@@ -148,36 +134,35 @@ pub unsafe fn forced_align_viterbi_cuda_zerocopy(
             .arg(&(s_len as i32))
             .arg(&(v_len as i32))
             .arg(&final_floor_state)
-            .launch(cfg)
+            .launch(cfg_fwd)
             .ok()?;
     }
 
-    // Readback only bp + 2 scores (NOT log_probs — that stays on GPU)
-    let bp_host: Vec<i32> = stream.clone_dtoh(&bp_dev).ok()?;
-    let out_host: Vec<f32> = stream.clone_dtoh(&out_dev).ok()?;
-
-    // --- Backtrack on CPU ---
-    let score_last = out_host[0];
-    let score_prev = out_host[1];
-
-    let mut s = s_len - 1;
-    if s_len >= 2 && score_prev > score_last {
-        s = s_len - 2;
+    // Backtrace on GPU — single thread, reads bp + out, writes path_dev
+    let cfg_bt = LaunchConfig {
+        block_dim: (1, 1, 1),
+        grid_dim: (1, 1, 1),
+        shared_mem_bytes: 0,
+    };
+    unsafe {
+        stream
+            .launch_builder(&func_bt)
+            .arg(&bp_dev)
+            .arg(&out_dev)
+            .arg(&mut path_dev)
+            .arg(&(t_len as i32))
+            .arg(&(s_len as i32))
+            .launch(cfg_bt)
+            .ok()?;
     }
 
-    let mut path = Vec::with_capacity(t_len);
-    path.push((s, t_len - 1));
-    for t in (1..t_len).rev() {
-        let step = bp_host[t * s_len + s];
-        s = match step {
-            0 => s,
-            1 => s - 1,
-            2 => s - 2,
-            _ => s,
-        };
-        path.push((s, t - 1));
-    }
-    path.reverse();
+    // Readback only path (T × 4 bytes) instead of bp (T×S × 4 bytes)
+    let path_host: Vec<i32> = stream.clone_dtoh(&path_dev).ok()?;
+    let path: Vec<(usize, usize)> = path_host
+        .iter()
+        .enumerate()
+        .map(|(t, &s)| (s as usize, t))
+        .collect();
 
     Some(path)
 }

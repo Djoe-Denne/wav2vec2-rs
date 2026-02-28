@@ -285,14 +285,6 @@ impl RuntimeBackend for OnnxRuntimeBackend {
         self.run_forward(normalized_audio)
     }
 
-    fn synchronize(&self, _context: &'static str) -> Result<(), AlignmentError> {
-        if self.device_label == "cuda" {
-            #[cfg(feature = "cuda-dp")]
-            crate::alignment::viterbi::cuda::synchronize_cuda_device(_context)?;
-        }
-        Ok(())
-    }
-
     fn infer_profiled(
         &self,
         normalized_audio: &[f32],

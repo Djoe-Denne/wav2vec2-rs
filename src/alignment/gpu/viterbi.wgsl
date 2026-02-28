@@ -18,6 +18,7 @@ struct Params {
 @group(0) @binding(3) var<storage, read_write> bp        : array<u32>;  // T × S
 @group(0) @binding(4) var<storage, read_write> scores    : array<f32>;  // 2 × S (ping-pong)
 @group(0) @binding(5) var<storage, read_write> out       : array<f32>;  // [score_last, score_prev]
+@group(0) @binding(6) var<storage, read_write> path      : array<u32>;  // [T] state index per frame
 
 const NEG_INF: f32 = -1.0e30;
 const WG_SIZE: u32 = 256u;
@@ -103,13 +104,24 @@ fn viterbi_main(@builtin(local_invocation_index) lid: u32) {
         curr_off = tmp;
     }
 
-    // --- Write final two scores for backtrack start selection ---
+    // --- Write final two scores and inline backtrack (single thread) ---
     if lid == 0u {
         out[0] = scores[prev_off + s_len - 1u];
         if s_len >= 2u {
             out[1] = scores[prev_off + s_len - 2u];
         } else {
             out[1] = NEG_INF;
+        }
+
+        // Inline backtrack: write path[t] = state at time t (only T×4 bytes readback)
+        var s = s_len - 1u;
+        if s_len >= 2u && out[1] > out[0] {
+            s = s_len - 2u;
+        }
+        path[t_len - 1u] = s;
+        for (var t = t_len - 1u; t >= 1u; t--) {
+            s -= bp[t * s_len + s];
+            path[t - 1u] = s;
         }
     }
 }

@@ -85,9 +85,9 @@ extern "C" __global__ void viterbi_forward(
 
     // --- t=0: seed first 1-2 states ---
     if (lid == 0) {
-        prev[0] = __ldg(&log_probs[tokens[0]]);
+        prev[0] = log_probs[tokens[0]];
         if (s_len > 1) {
-            prev[1] = __ldg(&log_probs[tokens[1]]);
+            prev[1] = log_probs[tokens[1]];
         }
     }
     __syncthreads();
@@ -106,8 +106,7 @@ extern "C" __global__ void viterbi_forward(
         const int bp_base = t * s_len;
 
         for (int s = lid + curr_start; s <= curr_end; s += stride) {
-            const int tok_s = __ldg(&tokens[s]);
-            const float emit = __ldg(&row[tok_s]);
+            const float emit = row[tokens[s]];
             float best = NEG_INF;
             int step = 0;
 
@@ -128,14 +127,11 @@ extern "C" __global__ void viterbi_forward(
             }
 
             // From s-2 (only if tokens differ — CTC skip constraint)
-            if (s >= 2) {
-                const int tok_s2 = __ldg(&tokens[s - 2]);
-                if (tok_s != tok_s2) {
-                    cand = prev[s - 2];
-                    if (cand > best) {
-                        best = cand;
-                        step = 2;
-                    }
+            if (s >= 2 && tokens[s] != tokens[s - 2]) {
+                cand = prev[s - 2];
+                if (cand > best) {
+                    best = cand;
+                    step = 2;
                 }
             }
 
@@ -145,15 +141,41 @@ extern "C" __global__ void viterbi_forward(
 
         __syncthreads();
 
-        // Ping-pong swap via pointer swap (local only — no sync needed)
+        // Ping-pong swap via pointer swap
         float* tmp = prev;
         prev = curr;
         curr = tmp;
+
+        __syncthreads();
     }
 
     // --- Write final two scores ---
     if (lid == 0) {
         out_scores[0] = prev[s_len - 1];
         out_scores[1] = (s_len >= 2) ? prev[s_len - 2] : NEG_INF;
+    }
+}
+
+// Backtrack on GPU: single thread, O(T), reads bp + scores, writes path_out[T].
+// Caller downloads only path_out (T × 4 bytes) instead of bp (T×S × 4 bytes).
+extern "C" __global__ void viterbi_backtrace(
+    const int* __restrict__ bp,         // [T, S]
+    const float* __restrict__ scores,   // [2] final scores
+    int* __restrict__ path_out,         // [T] output: state index per frame
+    int t_len,
+    int s_len
+) {
+    if (threadIdx.x != 0) return;
+
+    int s = s_len - 1;
+    if (s_len >= 2 && scores[1] > scores[0]) {
+        s = s_len - 2;
+    }
+
+    path_out[t_len - 1] = s;
+    for (int t = t_len - 1; t >= 1; t--) {
+        int step = bp[t * s_len + s];
+        s -= step;
+        path_out[t - 1] = s;
     }
 }

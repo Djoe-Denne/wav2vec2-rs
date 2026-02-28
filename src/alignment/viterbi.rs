@@ -28,7 +28,7 @@ pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(us
         }
         #[cfg(feature = "cuda-dp")]	
         {
-            if let Some(path) = cuda::forced_align_viterbi_cuda_zerocopy(log_probs, tokens) {
+            if let Some(path) = cuda::forced_align_viterbi_cuda(log_probs, tokens) {
                 return path;
             }
             tracing::debug!("cuda Viterbi unavailable, falling back to CPU");
