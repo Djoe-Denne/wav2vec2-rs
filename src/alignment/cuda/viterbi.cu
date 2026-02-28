@@ -4,6 +4,57 @@
 // Single block loops over T time steps with __syncthreads().
 // Only bp[] and 2 final scores are copied back to host.
 
+// Log-softmax over rows: logits [T,V] -> log_probs [T,V].
+// One block per row. Used when ORT outputs logits and we need log_probs on GPU.
+extern "C" __global__ void log_softmax_rows(
+    const float* __restrict__ logits,
+    float* __restrict__ log_probs,
+    int t_len,
+    int v_len
+) {
+    int t = blockIdx.x;
+    if (t >= t_len) return;
+    const float* row_in = logits + t * v_len;
+    float* row_out = log_probs + t * v_len;
+
+    // Step 1: find max (block reduction)
+    float max_val = -1e30f;
+    for (int i = threadIdx.x; i < v_len; i += blockDim.x) {
+        float v = row_in[i];
+        if (v > max_val) max_val = v;
+    }
+    __shared__ float smem_max[256];
+    smem_max[threadIdx.x] = max_val;
+    __syncthreads();
+    for (int s = blockDim.x / 2; s > 0; s /= 2) {
+        if (threadIdx.x < s && smem_max[threadIdx.x + s] > smem_max[threadIdx.x]) {
+            smem_max[threadIdx.x] = smem_max[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+    max_val = smem_max[0];
+
+    // Step 2: sum exp(x - max)
+    float sum = 0.0f;
+    for (int i = threadIdx.x; i < v_len; i += blockDim.x) {
+        sum += expf(row_in[i] - max_val);
+    }
+    __shared__ float smem_sum[256];
+    smem_sum[threadIdx.x] = sum;
+    __syncthreads();
+    for (int s = blockDim.x / 2; s > 0; s /= 2) {
+        if (threadIdx.x < s) smem_sum[threadIdx.x] += smem_sum[threadIdx.x + s];
+        __syncthreads();
+    }
+    float total = smem_sum[0];
+    float log_denom = max_val + logf(total);
+
+    // Step 3: write output
+    for (int i = threadIdx.x; i < v_len; i += blockDim.x) {
+        row_out[i] = row_in[i] - log_denom;
+    }
+}
+
 extern "C" __global__ void viterbi_forward(
     const float* __restrict__ log_probs,   // [T, V] row-major — ORT device ptr
     const int*   __restrict__ tokens,      // [S]
@@ -34,9 +85,9 @@ extern "C" __global__ void viterbi_forward(
 
     // --- t=0: seed first 1-2 states ---
     if (lid == 0) {
-        prev[0] = log_probs[tokens[0]];
+        prev[0] = __ldg(&log_probs[tokens[0]]);
         if (s_len > 1) {
-            prev[1] = log_probs[tokens[1]];
+            prev[1] = __ldg(&log_probs[tokens[1]]);
         }
     }
     __syncthreads();
@@ -55,7 +106,8 @@ extern "C" __global__ void viterbi_forward(
         const int bp_base = t * s_len;
 
         for (int s = lid + curr_start; s <= curr_end; s += stride) {
-            const float emit = row[tokens[s]];
+            const int tok_s = __ldg(&tokens[s]);
+            const float emit = __ldg(&row[tok_s]);
             float best = NEG_INF;
             int step = 0;
 
@@ -76,11 +128,14 @@ extern "C" __global__ void viterbi_forward(
             }
 
             // From s-2 (only if tokens differ — CTC skip constraint)
-            if (s >= 2 && tokens[s] != tokens[s - 2]) {
-                cand = prev[s - 2];
-                if (cand > best) {
-                    best = cand;
-                    step = 2;
+            if (s >= 2) {
+                const int tok_s2 = __ldg(&tokens[s - 2]);
+                if (tok_s != tok_s2) {
+                    cand = prev[s - 2];
+                    if (cand > best) {
+                        best = cand;
+                        step = 2;
+                    }
                 }
             }
 
@@ -90,12 +145,10 @@ extern "C" __global__ void viterbi_forward(
 
         __syncthreads();
 
-        // Ping-pong swap via pointer swap
+        // Ping-pong swap via pointer swap (local only — no sync needed)
         float* tmp = prev;
         prev = curr;
         curr = tmp;
-
-        __syncthreads();
     }
 
     // --- Write final two scores ---

@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::error::AlignmentError;
-use crate::pipeline::traits::{RuntimeBackend, SequenceAligner, Tokenizer, WordGrouper};
+use crate::pipeline::traits::{
+    ForwardOutput, RuntimeBackend, SequenceAligner, Tokenizer, WordGrouper,
+};
 use crate::types::{AlignmentInput, AlignmentOutput};
 
 pub struct ForcedAligner {
@@ -82,7 +84,7 @@ impl ForcedAligner {
         }
 
         let normalized = normalize_audio(&input.samples);
-        let log_probs = self.runtime_backend.infer(&normalized)?.log_probs;
+        let forward_output = self.runtime_backend.infer(&normalized)?;
 
         let token_sequence = self.tokenizer.tokenize(
             &input.transcript,
@@ -95,7 +97,7 @@ impl ForcedAligner {
             return Ok(AlignmentOutput { words: Vec::new() });
         }
 
-        let t_len = log_probs.len();
+        let (t_len, _, _) = forward_output.metadata();
         let min_frames = (token_sequence.tokens.len() + 1) / 2;
         if t_len < min_frames {
             return Err(AlignmentError::invalid_input(format!(
@@ -103,10 +105,12 @@ impl ForcedAligner {
             )));
         }
 
-        let path = self
-            .sequence_aligner
-            .align_path(&log_probs, &token_sequence.tokens)?;
-        let mut words = self.word_grouper.group_words(
+        let (path, log_probs) = dispatch_viterbi(
+            self.sequence_aligner.as_ref(),
+            forward_output,
+            &token_sequence.tokens,
+        )?;
+        let words = self.word_grouper.group_words(
             &path,
             &token_sequence,
             &log_probs,
@@ -160,11 +164,8 @@ impl ForcedAligner {
         let profiled_runtime = self.runtime_backend.infer_profiled(&normalized)?;
         let forward_ms = profiled_runtime.forward_ms;
         let post_ms = profiled_runtime.post_ms;
-        let runtime_output = profiled_runtime.output;
-        let num_frames_t = runtime_output.num_frames_t;
-        let vocab_size = runtime_output.vocab_size;
-        let dtype = runtime_output.dtype;
-        let log_probs = runtime_output.log_probs;
+        let forward_output = profiled_runtime.forward_output;
+        let (num_frames_t, vocab_size, dtype) = forward_output.metadata();
 
         self.runtime_backend
             .synchronize("runtime synchronize before align timing")?;
@@ -209,7 +210,7 @@ impl ForcedAligner {
             });
         }
 
-        let t_len = log_probs.len();
+        let t_len = num_frames_t;
         let min_frames = (token_sequence.tokens.len() + 1) / 2;
         if t_len < min_frames {
             return Err(AlignmentError::invalid_input(format!(
@@ -218,9 +219,11 @@ impl ForcedAligner {
         }
 
         let dp_started = Instant::now();
-        let path = self
-            .sequence_aligner
-            .align_path(&log_probs, &token_sequence.tokens)?;
+        let (path, log_probs) = dispatch_viterbi(
+            self.sequence_aligner.as_ref(),
+            forward_output,
+            &token_sequence.tokens,
+        )?;
         let dp_ms = duration_to_ms(dp_started.elapsed());
 
         let group_started = Instant::now();
@@ -296,4 +299,31 @@ fn normalize_audio(samples: &[f32]) -> Vec<f32> {
 
 fn duration_to_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
+}
+
+fn dispatch_viterbi(
+    sequence_aligner: &dyn SequenceAligner,
+    forward_output: ForwardOutput,
+    tokens: &[usize],
+) -> Result<(Vec<(usize, usize)>, Vec<Vec<f32>>), AlignmentError> {
+    match forward_output {
+        #[cfg(feature = "cuda-dp")]
+        ForwardOutput::CudaDevice(buf) => {
+            let path = buf
+                .run_viterbi(tokens)
+                .unwrap_or_default();
+            if path.is_empty() {
+                return Err(AlignmentError::runtime(
+                    "cuda viterbi zerocopy",
+                    "CUDA Viterbi failed; zero-copy path unavailable",
+                ));
+            }
+            let runtime_output = buf.to_runtime_inference_output()?;
+            Ok((path, runtime_output.log_probs))
+        }
+        ForwardOutput::Host(o) => {
+            let path = sequence_aligner.align_path(&o.log_probs, tokens)?;
+            Ok((path, o.log_probs))
+        }
+    }
 }
