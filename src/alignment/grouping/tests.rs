@@ -188,16 +188,16 @@ fn group_into_words_basic() {
     // Path: 10 frames, each assigned to a state
     // Frames 0-2: blank, 3-4: A, 5: blank, 6: sep, 7: blank, 8-9: B
     let path = vec![
-        (0, 0), // blank
-        (0, 1), // blank
-        (0, 2), // blank
-        (1, 3), // A
-        (1, 4), // A (same state, not new)
-        (0, 5), // blank
-        (0, 6), // blank
-        (3, 7), // sep (token id 2) -- wait, state 3 has token 2 (sep)
-        (0, 8), // blank
-        (0, 9), // blank
+        (0, 0),  // blank
+        (0, 1),  // blank
+        (0, 2),  // blank
+        (1, 3),  // A
+        (1, 4),  // A (same state, not new)
+        (0, 5),  // blank
+        (0, 6),  // blank
+        (3, 7),  // sep (token id 2) -- wait, state 3 has token 2 (sep)
+        (0, 8),  // blank
+        (0, 9),  // blank
         (5, 10), // B
         (5, 11), // B (same state, not new)
     ];
