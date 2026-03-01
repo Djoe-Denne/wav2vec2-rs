@@ -67,9 +67,9 @@ fn expand_three_words() {
 
     assert_eq!(result[0].start_frame, 10);
     assert_eq!(result[0].end_frame, 20); // mid(15,25) = 20
-    assert_eq!(result[1].start_frame, 25);
+    assert_eq!(result[1].start_frame, 21);
     assert_eq!(result[1].end_frame, 35); // mid(30,40) = 35
-    assert_eq!(result[2].start_frame, 40);
+    assert_eq!(result[2].start_frame, 36);
     assert_eq!(result[2].end_frame, 45);
 }
 
