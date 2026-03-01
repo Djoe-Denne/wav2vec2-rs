@@ -1,3 +1,6 @@
+
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=Djoe-Denne_wav2vec2-rs&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=Djoe-Denne_wav2vec2-rs) [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=Djoe-Denne_wav2vec2-rs&metric=coverage)](https://sonarcloud.io/summary/new_code?id=Djoe-Denne_wav2vec2-rs) [![Security Rating](https://sonarcloud.io/api/project_badges/measure?project=Djoe-Denne_wav2vec2-rs&metric=security_rating)](https://sonarcloud.io/summary/new_code?id=Djoe-Denne_wav2vec2-rs) [![Maintainability Rating](https://sonarcloud.io/api/project_badges/measure?project=Djoe-Denne_wav2vec2-rs&metric=sqale_rating)](https://sonarcloud.io/summary/new_code?id=Djoe-Denne_wav2vec2-rs)
+
 # wav2vec2-align
 
 A Rust library for **CTC forced alignment** using wav2vec2 acoustic models. Maps a known transcript onto an audio signal at word level, producing millisecond-precision timing boundaries with per-word confidence scores.
