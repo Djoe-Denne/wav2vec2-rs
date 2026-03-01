@@ -86,8 +86,20 @@ impl ForcedAligner {
             );
         }
 
-        let normalized = normalize_audio(&input.samples);
-        let forward_output = self.runtime_backend.infer(&normalized)?;
+        if let Some(ref n) = input.normalized {
+            self.align_inner(n, input)
+        } else {
+            let computed = normalize_audio(&input.samples);
+            self.align_inner(&computed, input)
+        }
+    }
+
+    fn align_inner(
+        &self,
+        normalized: &[f32],
+        input: &AlignmentInput,
+    ) -> Result<AlignmentOutput, AlignmentError> {
+        let forward_output = self.runtime_backend.infer(normalized)?;
 
         let token_sequence = self.tokenizer.tokenize(
             &input.transcript,
@@ -163,8 +175,21 @@ impl ForcedAligner {
             .synchronize("runtime synchronize before total timing")?;
         let total_started = Instant::now();
 
-        let normalized = normalize_audio(&input.samples);
-        let profiled_runtime = self.runtime_backend.infer_profiled(&normalized)?;
+        if let Some(ref n) = input.normalized {
+            self.run_align_profiled_inner(n, input, total_started)
+        } else {
+            let computed = normalize_audio(&input.samples);
+            self.run_align_profiled_inner(&computed, input, total_started)
+        }
+    }
+
+    fn run_align_profiled_inner(
+        &self,
+        normalized: &[f32],
+        input: &AlignmentInput,
+        total_started: Instant,
+    ) -> Result<ProfiledAlignmentOutput, AlignmentError> {
+        let profiled_runtime = self.runtime_backend.infer_profiled(normalized)?;
         let forward_ms = profiled_runtime.forward_ms;
         let post_ms = profiled_runtime.post_ms;
         let forward_output = profiled_runtime.forward_output;
@@ -323,11 +348,17 @@ impl ForcedAligner {
         sync()?;
         let total_started = Instant::now();
 
-        let normalized = normalize_audio(&input.samples);
+        let computed_normalized;
+        let normalized_slice: &[f32] = if let Some(ref n) = input.normalized {
+            n.as_slice()
+        } else {
+            computed_normalized = normalize_audio(&input.samples);
+            &computed_normalized
+        };
         let (profiled_runtime, mem_forward) = tracker.measure(
             "forward",
             sync,
-            || self.runtime_backend.infer_profiled(&normalized),
+            || self.runtime_backend.infer_profiled(normalized_slice),
         )?;
         let forward_ms = profiled_runtime.forward_ms;
         let post_ms = profiled_runtime.post_ms;
@@ -468,7 +499,8 @@ impl ForcedAligner {
     }
 }
 
-fn normalize_audio(samples: &[f32]) -> Vec<f32> {
+/// Normalizes audio to zero mean and unit variance. Exposed so callers can precompute and pass via `AlignmentInput::normalized` to avoid recomputing across repeats.
+pub fn normalize_audio(samples: &[f32]) -> Vec<f32> {
     let n = samples.len() as f64;
     let mean = samples.iter().map(|&x| x as f64).sum::<f64>() / n;
     let var = samples

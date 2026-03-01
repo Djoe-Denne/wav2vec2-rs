@@ -25,24 +25,41 @@ use wav2vec2_rs::pipeline::memory_tracker::{MemoryTracker, StageMemoryMap};
 mod text_grid_report_formatter;
 
 #[cfg(feature = "alignment-profiling")]
-fn stage_memory_map_to_per_run(
+fn stage_memory_map_to_perf_memory(
     m: &StageMemoryMap,
-) -> perf_report_formatter::StageMemoryPerRun {
-    use perf_report_formatter::{StageMemoryBytes, StageMemoryPerRun};
-    fn to_bytes(s: &wav2vec2_rs::pipeline::memory_tracker::StageMemory) -> StageMemoryBytes {
-        StageMemoryBytes {
-            cpu: s.peak_cpu_rss_bytes,
-            gpu_alloc: s.peak_gpu_allocated_bytes,
-            gpu_reserved: s.peak_gpu_reserved_bytes,
+) -> Option<perf_report_formatter::PerfMemory> {
+    use perf_report_formatter::GpuMemorySnapshot;
+    use wav2vec2_rs::pipeline::memory_tracker::StageMemory;
+    fn to_snapshot(s: &StageMemory) -> Option<GpuMemorySnapshot> {
+        if s.peak_gpu_allocated_bytes > 0 || s.gpu_total_bytes > 0 {
+            Some(GpuMemorySnapshot {
+                gpu_used: s.peak_gpu_allocated_bytes,
+                gpu_total: s.gpu_total_bytes,
+            })
+        } else {
+            None
         }
     }
-    StageMemoryPerRun {
-        forward: to_bytes(&m.forward),
-        post: to_bytes(&m.post),
-        dp: to_bytes(&m.dp),
-        group: to_bytes(&m.group),
-        conf: to_bytes(&m.conf),
+    let forward = to_snapshot(&m.forward);
+    let post = to_snapshot(&m.post);
+    let dp = to_snapshot(&m.dp);
+    let group = to_snapshot(&m.group);
+    let conf = to_snapshot(&m.conf);
+    if forward.is_none()
+        && post.is_none()
+        && dp.is_none()
+        && group.is_none()
+        && conf.is_none()
+    {
+        return None;
     }
+    Some(perf_report_formatter::PerfMemory {
+        forward,
+        post,
+        dp,
+        group,
+        conf,
+    })
 }
 
 const LIBRISPEECH_SUBSETS: [&str; 2] = ["test-clean", "test-other"];
@@ -53,6 +70,9 @@ enum OutputFormat {
     Json,
     #[value(name = "textgrid")]
     TextGrid,
+    /// Run alignment for performance measurement only; write perf JSON/JSONL but no report or TextGrid files.
+    #[value(name = "perf")]
+    Perf,
 }
 
 #[cfg(feature = "alignment-profiling")]
@@ -222,9 +242,7 @@ fn run() -> Result<(), String> {
     }
     let out_path = match args.output_format {
         OutputFormat::Json => Some(resolve_out_path(&repo_root, args.out.as_ref())),
-        OutputFormat::TextGrid => {
-            None
-        }
+        OutputFormat::TextGrid | OutputFormat::Perf => None,
     };
     #[cfg(feature = "alignment-profiling")]
     let perf_out_path = args
@@ -233,11 +251,15 @@ fn run() -> Result<(), String> {
         .map(|path| resolve_path(&repo_root, path));
     #[cfg(not(feature = "alignment-profiling"))]
     let perf_out_path: Option<PathBuf> = None;
+    #[cfg(feature = "alignment-profiling")]
+    if args.output_format == OutputFormat::Perf && perf_out_path.is_none() {
+        return Err("--output-format perf requires --perf-out.".to_string());
+    }
 
     let include_ids = load_case_filter(args.cases_file.as_ref(), &repo_root)?;
     let mut cases = match args.output_format {
         OutputFormat::Json => load_all_cases(&dataset_root)?,
-        OutputFormat::TextGrid => load_all_cases_from_transcripts(&dataset_root)?,
+        OutputFormat::TextGrid | OutputFormat::Perf => load_all_cases_from_transcripts(&dataset_root)?,
     };
 
     if let Some(ids) = include_ids.as_ref() {
@@ -325,6 +347,12 @@ fn run() -> Result<(), String> {
     #[cfg(feature = "alignment-profiling")]
     let mut perf_total_samples = Vec::new();
     #[cfg(feature = "alignment-profiling")]
+    let mut perf_forward_gpu_used_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
+    let mut perf_dp_gpu_used_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
+    let mut perf_gpu_total: Option<u64> = None;
+    #[cfg(feature = "alignment-profiling")]
     let mut scaling_samples = Vec::new();
     #[cfg(feature = "alignment-profiling")]
     let mut perf_warmup_done = false;
@@ -353,10 +381,23 @@ fn run() -> Result<(), String> {
             ((samples.len() as u128) * 1000 / sample_rate_hz as u128) as u64
         };
 
+        let normalized = if perf_enabled {
+            #[cfg(feature = "alignment-profiling")]
+            {
+                Some(wav2vec2_rs::normalize_audio(&samples))
+            }
+            #[cfg(not(feature = "alignment-profiling"))]
+            {
+                None
+            }
+        } else {
+            None
+        };
         let alignment_input = AlignmentInput {
             sample_rate_hz,
             samples,
             transcript: case.transcript.clone(),
+            normalized,
         };
         let output_words = if perf_enabled {
             #[cfg(feature = "alignment-profiling")]
@@ -384,11 +425,12 @@ fn run() -> Result<(), String> {
                 let mut selected_vocab_size = 0usize;
                 let mut selected_dtype = String::new();
                 let mut selected_device = String::new();
-                let mut memory_map: Option<StageMemoryMap> = None;
-                let gpu_reader = if args.device.eq_ignore_ascii_case("cuda") {
-                    wav2vec2_rs::pipeline::memory_tracker::cuda_gpu_reader()
-                } else {
+                let mut process_memory: Option<StageMemoryMap> = None;
+                // Use GPU memory probe for both cuda and generic-gpu (ORT CUDA EP loads libcudart).
+                let gpu_reader = if args.device.eq_ignore_ascii_case("cpu") {
                     None
+                } else {
+                    wav2vec2_rs::pipeline::memory_tracker::cuda_gpu_reader()
                 };
                 let mut tracker = MemoryTracker::new(gpu_reader);
 
@@ -397,7 +439,7 @@ fn run() -> Result<(), String> {
                         let (prof, mem) = aligner
                             .align_profiled_with_memory(&alignment_input, &mut tracker)
                             .map_err(|err| format!("{}: perf align_with_memory() failed: {err}", case.id))?;
-                        memory_map = Some(mem);
+                        process_memory = Some(mem);
                         prof
                     } else {
                         aligner
@@ -474,7 +516,7 @@ fn run() -> Result<(), String> {
                     conf_ms_repeats,
                     align_ms_repeats,
                     total_ms_repeats,
-                    memory: memory_map.as_ref().map(stage_memory_map_to_per_run),
+                    memory: process_memory.as_ref().and_then(stage_memory_map_to_perf_memory),
                 };
 
                 perf_forward_samples.push(record.forward_ms);
@@ -486,6 +528,17 @@ fn run() -> Result<(), String> {
                 perf_align_per_ts_samples.push(record.align_ms_per_ts);
                 perf_align_per_t_samples.push(record.align_ms_per_t);
                 perf_total_samples.push(record.total_ms);
+                if let Some(ref mem) = record.memory {
+                    if let Some(ref f) = mem.forward {
+                        perf_forward_gpu_used_samples.push(f.gpu_used as f64);
+                        if perf_gpu_total.is_none() {
+                            perf_gpu_total = Some(f.gpu_total);
+                        }
+                    }
+                    if let Some(ref d) = mem.dp {
+                        perf_dp_gpu_used_samples.push(d.gpu_used as f64);
+                    }
+                }
                 scaling_samples.push(ScalingSample {
                     utterance_id: record.utterance_id.clone(),
                     num_frames_t: record.num_frames_t,
@@ -548,6 +601,7 @@ fn run() -> Result<(), String> {
                 )?;
                 written_textgrids += 1;
             }
+            OutputFormat::Perf => {}
         }
         progress.inc(1);
     }
@@ -607,6 +661,7 @@ fn run() -> Result<(), String> {
                 );
             }
         }
+        OutputFormat::Perf => {}
     }
 
     #[cfg(feature = "alignment-profiling")]
@@ -622,6 +677,11 @@ fn run() -> Result<(), String> {
             align_ms_per_ts: summarize_metric(&perf_align_per_ts_samples),
             align_ms_per_t: summarize_metric(&perf_align_per_t_samples),
             total_ms: summarize_metric(&perf_total_samples),
+            memory: perf_gpu_total.map(|gpu_total| perf_report_formatter::PerfAggregateMemory {
+                forward_gpu_used: summarize_metric(&perf_forward_gpu_used_samples),
+                dp_gpu_used: summarize_metric(&perf_dp_gpu_used_samples),
+                gpu_total,
+            }),
         };
         if args.perf_append {
             if let Some(appender) = perf_jsonl_appender.take() {

@@ -1,4 +1,4 @@
-import type { GlobalFilters, MemoryBreakdown, RustPerfRecord } from '../types/report';
+import type { GlobalFilters, GpuMemorySnapshot, PerfMemory, PerfMemoryPerStage, RustPerfRecord } from '../types/report';
 
 export const STAGE_KEYS = ['forward', 'post', 'dp', 'group', 'conf'] as const;
 export type StageKey = (typeof STAGE_KEYS)[number];
@@ -69,31 +69,46 @@ export function stageRatio(record: RustPerfRecord, stage: StageKey): number {
 }
 
 export interface PeakMemory {
+  /** Peak GPU used (bytes) across stages; same as peak_gpu_used. */
   peak_gpu_alloc: number;
   peak_cpu: number;
   peak_stage: string;
 }
 
+function isFlatMemory(mem: PerfMemory | PerfMemoryPerStage): mem is PerfMemory {
+  return 'gpu_used' in mem && typeof (mem as PerfMemory).gpu_used === 'number';
+}
+
+function peakGpuFromPerStage(mem: PerfMemoryPerStage): { peak_gpu_alloc: number; peak_stage: string } | undefined {
+  let maxUsed = 0;
+  let maxStage = 'align';
+  for (const stage of STAGE_KEYS) {
+    const snap: GpuMemorySnapshot | undefined = mem[stage];
+    if (snap && typeof snap.gpu_used === 'number' && snap.gpu_used > maxUsed) {
+      maxUsed = snap.gpu_used;
+      maxStage = stage;
+    }
+  }
+  return maxUsed > 0 ? { peak_gpu_alloc: maxUsed, peak_stage: maxStage } : undefined;
+}
+
 export function peakMemory(record: RustPerfRecord): PeakMemory | undefined {
   const mem = record.memory;
   if (!mem) return undefined;
-
-  let maxGpu = 0;
-  let maxCpu = 0;
-  let peakStage = '';
-
-  const stages: (keyof MemoryBreakdown)[] = ['forward', 'post', 'dp', 'group', 'conf', 'align'];
-  for (const stage of stages) {
-    const s = mem[stage];
-    if (!s) continue;
-    if (s.gpu_alloc > maxGpu) {
-      maxGpu = s.gpu_alloc;
-      peakStage = stage;
-    }
-    if (s.cpu > maxCpu) maxCpu = s.cpu;
+  if (isFlatMemory(mem)) {
+    return {
+      peak_gpu_alloc: mem.gpu_used,
+      peak_cpu: 0,
+      peak_stage: 'align',
+    };
   }
-
-  return { peak_gpu_alloc: maxGpu, peak_cpu: maxCpu, peak_stage: peakStage };
+  const fromStages = peakGpuFromPerStage(mem as PerfMemoryPerStage);
+  if (!fromStages) return undefined;
+  return {
+    peak_gpu_alloc: fromStages.peak_gpu_alloc,
+    peak_cpu: 0,
+    peak_stage: fromStages.peak_stage,
+  };
 }
 
 /** Bin (x, y) points by x and compute median y per bin. Returns bin centers and median y (null for empty bins). */
@@ -147,7 +162,7 @@ export interface RunAggregates {
   medianCostPerFrame: number;
   medianStageMs: Record<StageKey, number>;
   medianStageRatios: Record<StageKey, number>;
-  /** Median peak GPU alloc (bytes) over records that have memory; 0 if none. */
+  /** Median peak GPU alloc (bytes) over records with positive peak GPU; 0 if none. Zeros are excluded so runs with mixed 0/non-zero (e.g. Rust) show a meaningful median. */
   medianPeakGpuAlloc: number;
   /** Whether any record has memory data. */
   hasMemory: boolean;
@@ -184,6 +199,11 @@ export function computeRunAggregates(records: RustPerfRecord[]): RunAggregates {
 
   const peakGpuValues = records.map((r) => peakMemory(r)).filter((p): p is PeakMemory => p != null).map((p) => p.peak_gpu_alloc);
   const hasMemory = peakGpuValues.length > 0;
+  // Use median of positive values only so runs with mixed 0 and non-zero (e.g. Rust dual-context)
+  // show a meaningful "typical" peak GPU instead of 0 when most records report 0.
+  const positivePeakGpu = peakGpuValues.filter((v) => v > 0);
+  const medianPeakGpuAlloc =
+    hasMemory && positivePeakGpu.length > 0 ? median(positivePeakGpu) : 0;
 
   return {
     medianTotalMs: median(totalMs),
@@ -192,7 +212,7 @@ export function computeRunAggregates(records: RustPerfRecord[]): RunAggregates {
     medianCostPerFrame: median(costValues),
     medianStageMs,
     medianStageRatios,
-    medianPeakGpuAlloc: hasMemory ? median(peakGpuValues) : 0,
+    medianPeakGpuAlloc,
     hasMemory,
   };
 }

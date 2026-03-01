@@ -13,12 +13,48 @@ use std::time::Duration;
 
 use crate::error::AlignmentError;
 
+/// Snapshot of GPU memory at a point in time (used and total device memory in bytes).
+/// Use after device sync for accurate "after stage" readings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct GpuMemorySnapshot {
+    pub gpu_used: u64,
+    pub gpu_total: u64,
+}
+
+/// Returns current GPU memory (used, total) in bytes, or None if CUDA is not available.
+/// Prefer calling after synchronize() so async GPU work is reflected.
+/// Uses CUDA Driver API (cuMemGetInfo_v2); device-level view may require Runtime API
+/// (cudaMemGetInfo) when multiple contexts exist (e.g. ORT + cudarc).
+#[cfg(feature = "cuda-dp")]
+pub fn gpu_memory_snapshot() -> Option<GpuMemorySnapshot> {
+    use cudarc::driver::sys::{cuMemGetInfo_v2, CUresult};
+    let mut free: usize = 0;
+    let mut total: usize = 0;
+    let err = unsafe { cuMemGetInfo_v2(&mut free, &mut total) };
+    if err == CUresult::CUDA_SUCCESS {
+        let used = total.saturating_sub(free);
+        Some(GpuMemorySnapshot {
+            gpu_used: used as u64,
+            gpu_total: total as u64,
+        })
+    } else {
+        None
+    }
+}
+
+#[cfg(not(feature = "cuda-dp"))]
+pub fn gpu_memory_snapshot() -> Option<GpuMemorySnapshot> {
+    None
+}
+
 /// Peak memory observed during a single pipeline stage (all values in bytes).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct StageMemory {
     pub peak_cpu_rss_bytes: u64,
     pub peak_gpu_allocated_bytes: u64,
     pub peak_gpu_reserved_bytes: u64,
+    /// Total device memory in bytes (0 when no GPU). Same for all stages on a run.
+    pub gpu_total_bytes: u64,
 }
 
 /// Per-stage memory for the full pipeline (benchmark mode).
@@ -31,26 +67,18 @@ pub struct StageMemoryMap {
     pub conf: StageMemory,
 }
 
-/// Optional callback to read GPU memory (allocated, reserved) after sync.
+/// Optional callback to read GPU memory (used, total) in bytes after sync.
 /// Called on the main thread after synchronize(); return (0, 0) if unavailable.
 pub type GpuReader = Box<dyn Fn() -> (u64, u64) + Send>;
 
-/// When `cuda-dp` is enabled, returns a GPU reader that uses the CUDA driver API
-/// (cuMemGetInfo_v2) to report device used memory. Caller should use this when
-/// the backend device is CUDA so that Rust NDJSON has non-zero gpu_alloc.
+/// When `cuda-dp` is enabled, returns a GPU reader that reports (used, total) device memory.
+/// Uses gpu_memory_snapshot(); caller should use this when the backend device is CUDA.
 #[cfg(feature = "cuda-dp")]
 pub fn cuda_gpu_reader() -> Option<GpuReader> {
     Some(Box::new(|| {
-        use cudarc::driver::sys::{cuMemGetInfo_v2, CUresult};
-        let mut free: usize = 0;
-        let mut total: usize = 0;
-        let err = unsafe { cuMemGetInfo_v2(&mut free, &mut total) };
-        if err == CUresult::CUDA_SUCCESS {
-            let used = total.saturating_sub(free);
-            (used as u64, 0u64) // reserved not exposed by driver API
-        } else {
-            (0, 0)
-        }
+        gpu_memory_snapshot()
+            .map(|s| (s.gpu_used, s.gpu_total))
+            .unwrap_or((0, 0))
     }))
 }
 
@@ -127,7 +155,7 @@ impl MemoryTracker {
 
         let peak_cpu_rss_bytes = max_rss.load(Ordering::Relaxed);
 
-        let (peak_gpu_allocated_bytes, peak_gpu_reserved_bytes) = self
+        let (peak_gpu_allocated_bytes, gpu_total_bytes) = self
             .gpu_reader
             .as_ref()
             .map(|r| r())
@@ -138,7 +166,8 @@ impl MemoryTracker {
             StageMemory {
                 peak_cpu_rss_bytes,
                 peak_gpu_allocated_bytes,
-                peak_gpu_reserved_bytes,
+                peak_gpu_reserved_bytes: 0, // not exposed by driver API
+                gpu_total_bytes,
             },
         ))
     }

@@ -2,19 +2,29 @@ export type Aggregate = "median" | "mean" | "min" | "max" | "p50" | "p90" | "p95
 export type DType = "f16" | "bf16" | "f32" | "f64";
 export type Device = string;
 
-export interface StageMemory {
-  cpu: number;          // bytes (RSS peak during stage)
-  gpu_alloc: number;    // bytes (allocated peak)
-  gpu_reserved: number; // bytes (reserved peak)
+/** GPU memory snapshot at a point in time (used and total in bytes). Used by Rust per-stage memory. */
+export interface GpuMemorySnapshot {
+  gpu_used: number;
+  gpu_total: number;
 }
 
-export interface MemoryBreakdown {
-  forward?: StageMemory;
-  post?: StageMemory;
-  dp?: StageMemory;
-  group?: StageMemory;
-  conf?: StageMemory;
-  align?: StageMemory;
+/** Process-level GPU memory (bytes). One snapshot per alignment run. Python / flat format. */
+export interface PerfMemory {
+  /** Device-level used VRAM (cudaMemGetInfo: total - free). Comparable Rust/Python. */
+  gpu_used: number;
+  /** Device total VRAM (cudaMemGetInfo). */
+  gpu_total: number;
+  /** Optional: PyTorch allocated tensors only (torch.cuda.memory_allocated). Python only. */
+  gpu_allocated?: number;
+}
+
+/** Per-stage GPU memory (Rust format). Each stage may have a snapshot. */
+export interface PerfMemoryPerStage {
+  forward?: GpuMemorySnapshot;
+  post?: GpuMemorySnapshot;
+  dp?: GpuMemorySnapshot;
+  group?: GpuMemorySnapshot;
+  conf?: GpuMemorySnapshot;
 }
 
 export interface RustPerfRecord {
@@ -60,8 +70,8 @@ export interface RustPerfRecord {
   align_ms_repeats: number[];
   total_ms_repeats: number[];
 
-  // memory footprint
-  memory?: MemoryBreakdown;
+  // memory footprint: flat (Python) or per-stage (Rust)
+  memory?: PerfMemory | PerfMemoryPerStage;
 }
 
 /** Run file format as written by Rust or loaded from JSON. */
