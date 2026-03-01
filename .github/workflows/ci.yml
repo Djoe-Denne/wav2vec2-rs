@@ -36,8 +36,11 @@ jobs:
       - name: Tests (ONNX runtime on CPU)
         run: cargo test --features onnx
 
-      - name: TextGrid comparison (alignment validation)
-        run: python scripts/compare_textgrids.py test-data/LibriSpeech
+# TODO: Add back in when we have a way to compare the TextGrid files
+# need for that to download the librispeech dataset and the pregen TextGrid files
+# plus gpu node tu generate our own TextGrid files
+#      - name: TextGrid comparison (alignment validation)
+#        run: python scripts/compare_textgrids.py test-data/LibriSpeech
 
   coverage:
     name: Coverage (Linux)
