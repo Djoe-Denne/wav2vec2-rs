@@ -41,7 +41,7 @@ fn expand_two_words_splits_gap_at_midpoint() {
 
     assert_eq!(result[0].start_frame, 10); // not extended to first_frame
     assert_eq!(result[0].end_frame, 25); // midpoint of 20..30
-    assert_eq!(result[1].start_frame, 26);
+    assert_eq!(result[1].start_frame, 30);
     assert_eq!(result[1].end_frame, 40); // not extended to last_frame
 }
 
@@ -67,9 +67,9 @@ fn expand_three_words() {
 
     assert_eq!(result[0].start_frame, 10);
     assert_eq!(result[0].end_frame, 20); // mid(15,25) = 20
-    assert_eq!(result[1].start_frame, 21);
+    assert_eq!(result[1].start_frame, 25);
     assert_eq!(result[1].end_frame, 35); // mid(30,40) = 35
-    assert_eq!(result[2].start_frame, 36);
+    assert_eq!(result[2].start_frame, 40);
     assert_eq!(result[2].end_frame, 45);
 }
 
@@ -194,13 +194,15 @@ fn group_into_words_basic() {
         (1, 3), // A
         (1, 4), // A (same state, not new)
         (0, 5), // blank
-        (3, 6), // sep (token id 2) -- wait, state 3 has token 2 (sep)
-        (0, 7), // blank
-        (5, 8), // B
-        (5, 9), // B (same state, not new)
+        (0, 6), // blank
+        (3, 7), // sep (token id 2) -- wait, state 3 has token 2 (sep)
+        (0, 8), // blank
+        (0, 9), // blank
+        (5, 10), // B
+        (5, 11), // B (same state, not new)
     ];
 
-    let num_frames = 10;
+    let num_frames = 12;
     let vocab_size = 4; // blank, A, sep, B
     let log_probs: Vec<Vec<f32>> = (0..num_frames).map(|_| vec![-1.0; vocab_size]).collect();
 
@@ -219,12 +221,12 @@ fn group_into_words_basic() {
     assert_eq!(words[0].word, "A");
     assert_eq!(words[1].word, "B");
     // Char-only: A=[3,4], B=[8,9], gap frames 5,6,7
-    // mid(4, 8) = 6, so A=[3,6], B=[7,9]
+    // mid(4, 8) = 6, so A=[3,6], B=[10,12]
     // Leading blanks (0-2) and trailing frames stay unused (genuine silence).
     assert_eq!(words[0].start_ms, 3 * 20); // 60
-    assert_eq!(words[0].end_ms, (6 + 1) as u64 * 20); // 140
-    assert_eq!(words[1].start_ms, 7 * 20); // 140
-    assert_eq!(words[1].end_ms, (9 + 1) as u64 * 20); // 200
+    assert_eq!(words[0].end_ms, (5 + 1) as u64 * 20); // 120
+    assert_eq!(words[1].start_ms, 10 * 20); // 200
+    assert_eq!(words[1].end_ms, (11 + 1) as u64 * 20); // 220
     assert!(words[0].confidence.is_some());
     assert!(words[0].confidence_stats.geo_mean_prob.is_some());
     assert_eq!(words[0].confidence_stats.coverage_frame_count, 2);
