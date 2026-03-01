@@ -23,9 +23,7 @@ fn get_gpu_context() -> Option<&'static GpuContext> {
         .get_or_init(|| {
             pollster::block_on(async {
                 let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-                    backends: wgpu::Backends::VULKAN
-                        | wgpu::Backends::DX12
-                        | wgpu::Backends::METAL,
+                    backends: wgpu::Backends::VULKAN | wgpu::Backends::DX12 | wgpu::Backends::METAL,
                     ..Default::default()
                 });
 
@@ -93,15 +91,14 @@ fn get_gpu_context() -> Option<&'static GpuContext> {
                         push_constant_ranges: &[],
                     });
 
-                let pipeline =
-                    device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                        label: Some("viterbi-pipeline"),
-                        layout: Some(&pipeline_layout),
-                        module: &shader,
-                        entry_point: Some("viterbi_main"),
-                        compilation_options: Default::default(),
-                        cache: None,
-                    });
+                let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("viterbi-pipeline"),
+                    layout: Some(&pipeline_layout),
+                    module: &shader,
+                    entry_point: Some("viterbi_main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                });
 
                 Some(GpuContext {
                     device,
@@ -154,7 +151,10 @@ pub fn forced_align_viterbi_gpu(
     let v_len = log_probs[0].len();
 
     // --- Flatten log_probs into contiguous T×V buffer ---
-    let log_probs_flat: Vec<f32> = log_probs.iter().flat_map(|row| row.iter().copied()).collect();
+    let log_probs_flat: Vec<f32> = log_probs
+        .iter()
+        .flat_map(|row| row.iter().copied())
+        .collect();
     let tokens_u32: Vec<u32> = tokens.iter().map(|&t| t as u32).collect();
 
     let params = GpuParams {
@@ -284,9 +284,7 @@ pub fn forced_align_viterbi_gpu(
     let path_data = read_buffer(device, &staging_path, path_size);
     let path_u32: &[u32] = bytemuck::cast_slice(&path_data);
 
-    let path: Vec<(usize, usize)> = (0..t_len)
-        .map(|t| (path_u32[t] as usize, t))
-        .collect();
+    let path: Vec<(usize, usize)> = (0..t_len).map(|t| (path_u32[t] as usize, t)).collect();
 
     Some(path)
 }

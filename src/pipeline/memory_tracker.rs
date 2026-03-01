@@ -153,11 +153,8 @@ impl MemoryTracker {
 
         let peak_cpu_rss_bytes = max_rss.load(Ordering::Relaxed);
 
-        let (peak_gpu_allocated_bytes, gpu_total_bytes) = self
-            .gpu_reader
-            .as_ref()
-            .map(|r| r())
-            .unwrap_or((0, 0));
+        let (peak_gpu_allocated_bytes, gpu_total_bytes) =
+            self.gpu_reader.as_ref().map(|r| r()).unwrap_or((0, 0));
 
         Ok((
             result,
@@ -211,7 +208,9 @@ fn read_linux_rss() -> Option<u64> {
 #[cfg(target_os = "windows")]
 fn read_windows_rss() -> Option<u64> {
     use windows_sys::Win32::Foundation::HANDLE;
-    use windows_sys::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
     unsafe {

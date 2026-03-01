@@ -45,12 +45,7 @@ fn stage_memory_map_to_perf_memory(
     let dp = to_snapshot(&m.dp);
     let group = to_snapshot(&m.group);
     let conf = to_snapshot(&m.conf);
-    if forward.is_none()
-        && post.is_none()
-        && dp.is_none()
-        && group.is_none()
-        && conf.is_none()
-    {
+    if forward.is_none() && post.is_none() && dp.is_none() && group.is_none() && conf.is_none() {
         return None;
     }
     Some(perf_report_formatter::PerfMemory {
@@ -259,7 +254,9 @@ fn run() -> Result<(), String> {
     let include_ids = load_case_filter(args.cases_file.as_ref(), &repo_root)?;
     let mut cases = match args.output_format {
         OutputFormat::Json => load_all_cases(&dataset_root)?,
-        OutputFormat::TextGrid | OutputFormat::Perf => load_all_cases_from_transcripts(&dataset_root)?,
+        OutputFormat::TextGrid | OutputFormat::Perf => {
+            load_all_cases_from_transcripts(&dataset_root)?
+        }
     };
 
     if let Some(ids) = include_ids.as_ref() {
@@ -438,7 +435,9 @@ fn run() -> Result<(), String> {
                     let profiled = if repeat_idx == 0 {
                         let (prof, mem) = aligner
                             .align_profiled_with_memory(&alignment_input, &mut tracker)
-                            .map_err(|err| format!("{}: perf align_with_memory() failed: {err}", case.id))?;
+                            .map_err(|err| {
+                                format!("{}: perf align_with_memory() failed: {err}", case.id)
+                            })?;
                         process_memory = Some(mem);
                         prof
                     } else {
@@ -516,7 +515,9 @@ fn run() -> Result<(), String> {
                     conf_ms_repeats,
                     align_ms_repeats,
                     total_ms_repeats,
-                    memory: process_memory.as_ref().and_then(stage_memory_map_to_perf_memory),
+                    memory: process_memory
+                        .as_ref()
+                        .and_then(stage_memory_map_to_perf_memory),
                 };
 
                 perf_forward_samples.push(record.forward_ms);
@@ -559,11 +560,14 @@ fn run() -> Result<(), String> {
                     perf_records.push(record);
                 }
 
-                selected_words.ok_or_else(|| format!("{}: missing profiled output words", case.id))?
+                selected_words
+                    .ok_or_else(|| format!("{}: missing profiled output words", case.id))?
             }
             #[cfg(not(feature = "alignment-profiling"))]
             {
-                unreachable!("perf_enabled is only true when alignment-profiling feature is enabled")
+                unreachable!(
+                    "perf_enabled is only true when alignment-profiling feature is enabled"
+                )
             }
         } else {
             let lib_started = Instant::now();

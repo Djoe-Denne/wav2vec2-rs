@@ -26,7 +26,7 @@ pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(us
             }
             tracing::debug!("wgpu Viterbi unavailable, falling back to CPU");
         }
-        #[cfg(feature = "cuda-dp")]	
+        #[cfg(feature = "cuda-dp")]
         {
             if let Some(path) = cuda::forced_align_viterbi_cuda(log_probs, tokens) {
                 return path;
@@ -37,7 +37,6 @@ pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(us
 
     forced_align_viterbi_cpu(log_probs, tokens)
 }
-
 
 /// CPU-only CTC Viterbi (always available).
 #[allow(clippy::needless_range_loop)]
@@ -90,8 +89,14 @@ pub fn forced_align_viterbi_cpu(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec
     for t in (1..t_len).rev() {
         s = match bp[t * s_len + s] {
             0 => s,
-            1 => { debug_assert!(s >= 1); s - 1 }
-            2 => { debug_assert!(s >= 2); s - 2 }
+            1 => {
+                debug_assert!(s >= 1);
+                s - 1
+            }
+            2 => {
+                debug_assert!(s >= 2);
+                s - 2
+            }
             _ => s,
         };
         path.push((s, t - 1));

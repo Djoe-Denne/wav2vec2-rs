@@ -355,11 +355,9 @@ impl ForcedAligner {
             computed_normalized = normalize_audio(&input.samples);
             &computed_normalized
         };
-        let (profiled_runtime, mem_forward) = tracker.measure(
-            "forward",
-            sync,
-            || self.runtime_backend.infer_profiled(normalized_slice),
-        )?;
+        let (profiled_runtime, mem_forward) = tracker.measure("forward", sync, || {
+            self.runtime_backend.infer_profiled(normalized_slice)
+        })?;
         let forward_ms = profiled_runtime.forward_ms;
         let post_ms = profiled_runtime.post_ms;
         let forward_output = profiled_runtime.forward_output;
@@ -533,9 +531,7 @@ fn dispatch_viterbi(
     match forward_output {
         #[cfg(feature = "cuda-dp")]
         ForwardOutput::CudaDevice(buf) => {
-            let path = buf
-                .run_viterbi(tokens)
-                .unwrap_or_default();
+            let path = buf.run_viterbi(tokens).unwrap_or_default();
             if path.is_empty() {
                 return Err(AlignmentError::runtime(
                     "cuda viterbi zerocopy",

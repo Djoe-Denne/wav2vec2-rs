@@ -187,9 +187,7 @@ pub fn forced_align_viterbi_cuda(
 
     let (ptr, _sync) = log_probs_dev.device_ptr(&stream);
     // Safety: we own log_probs_dev, ptr is valid for the duration of this call
-    unsafe {
-        forced_align_viterbi_cuda_zerocopy(ptr as *const f32, t_len, v_len, tokens)
-    }
+    unsafe { forced_align_viterbi_cuda_zerocopy(ptr as *const f32, t_len, v_len, tokens) }
 }
 
 #[cfg(test)]
@@ -207,8 +205,7 @@ mod tests {
         ];
         let tokens = vec![0usize, 3, 1];
 
-        let cpu_path =
-            crate::alignment::viterbi::forced_align_viterbi_cpu(&log_probs, &tokens);
+        let cpu_path = crate::alignment::viterbi::forced_align_viterbi_cpu(&log_probs, &tokens);
 
         if let Some(cuda_path) = forced_align_viterbi_cuda(&log_probs, &tokens) {
             assert_eq!(cpu_path, cuda_path, "CUDA path must match CPU");

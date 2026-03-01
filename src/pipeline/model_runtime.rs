@@ -258,9 +258,7 @@ impl OnnxRuntimeBackend {
 
         #[cfg(all(feature = "onnx", feature = "cuda-dp"))]
         if self.device_label == "cuda" {
-            if let Some(cuda_output) =
-                try_cuda_forward_output(output)
-            {
+            if let Some(cuda_output) = try_cuda_forward_output(output) {
                 return Ok(ForwardOutput::CudaDevice(cuda_output));
             }
         }
