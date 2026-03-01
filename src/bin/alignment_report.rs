@@ -483,65 +483,195 @@ fn apply_case_output(
     Ok(())
 }
 
-fn run() -> Result<(), String> {
-    let args = Args::parse();
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+struct ReportFormatOutputContext<'a> {
+    args: &'a Args,
+    model_dir: &'a Path,
+    frame_stride_ms: f64,
+    out_path: &'a Option<PathBuf>,
+    sentence_reports: &'a mut Vec<SentenceReport>,
+    predicted_by_id: &'a HashMap<String, Vec<WordTiming>>,
+    references_by_id: &'a HashMap<String, Vec<ReferenceWord>>,
+    written_textgrids: usize,
+}
 
-    let model_dir = resolve_path(&repo_root, &args.model_dir);
-    let dataset_root = resolve_path(&repo_root, &args.dataset_root);
+fn write_report_format_output(ctx: &mut ReportFormatOutputContext<'_>) -> Result<(), String> {
+    match ctx.args.output_format {
+        OutputFormat::Json => {
+            let mut sentences = std::mem::take(ctx.sentence_reports);
+            let aggregates = aggregate_reports(&sentences);
+            attach_outlier_traces(
+                &mut sentences,
+                ctx.predicted_by_id,
+                ctx.references_by_id,
+                OUTLIER_TRACE_TOP_N,
+            );
+            let report = Report {
+                schema_version: 1,
+                meta: Meta {
+                    generated_at: Utc::now().to_rfc3339(),
+                    model_path: ctx.model_dir.to_string_lossy().into_owned(),
+                    device: ctx.args.device.clone(),
+                    frame_stride_ms: ctx.frame_stride_ms as f32,
+                    case_count: sentences.len(),
+                },
+                sentences,
+                aggregates,
+            };
+            let path = ctx.out_path.as_ref().ok_or_else(|| {
+                "internal error: missing output path for JSON report format".to_string()
+            })?;
+            json_report_formatter::write_report(path, &report)?;
+            println!("{}", path.display());
+        }
+        OutputFormat::TextGrid => {
+            if ctx.args.textgrid_suffix.is_empty() {
+                println!(
+                    "Wrote {} TextGrid file(s) alongside LibriSpeech .flac files.",
+                    ctx.written_textgrids
+                );
+            } else {
+                println!(
+                    "Wrote {} TextGrid file(s) with suffix '{}' alongside LibriSpeech .flac files.",
+                    ctx.written_textgrids, ctx.args.textgrid_suffix
+                );
+            }
+        }
+        OutputFormat::Perf => {}
+    }
+    Ok(())
+}
+
+#[cfg(feature = "alignment-profiling")]
+struct PerfOutputContext<'a> {
+    args: &'a Args,
+    perf_out_path: &'a Option<PathBuf>,
+    perf_config: &'a perf_report_formatter::PerfRunConfig,
+    perf_jsonl_appender: &'a mut Option<perf_report_formatter::PerfJsonlAppender>,
+    perf_records: &'a [perf_report_formatter::PerfUtteranceRecord],
+    perf_total_samples: &'a [f64],
+    perf_forward_samples: &'a [f64],
+    perf_post_samples: &'a [f64],
+    perf_dp_samples: &'a [f64],
+    perf_group_samples: &'a [f64],
+    perf_conf_samples: &'a [f64],
+    perf_align_samples: &'a [f64],
+    perf_align_per_ts_samples: &'a [f64],
+    perf_align_per_t_samples: &'a [f64],
+    perf_forward_gpu_used_samples: &'a [f64],
+    perf_dp_gpu_used_samples: &'a [f64],
+    perf_gpu_total: &'a Option<u64>,
+    scaling_samples: &'a [ScalingSample],
+}
+
+#[cfg(feature = "alignment-profiling")]
+fn write_perf_output(ctx: &mut PerfOutputContext<'_>) -> Result<(), String> {
+    let Some(perf_path) = ctx.perf_out_path.as_ref() else {
+        return Ok(());
+    };
+    let aggregate = perf_report_formatter::PerfAggregateStats {
+        utterance_count: ctx.perf_total_samples.len(),
+        forward_ms: summarize_metric(ctx.perf_forward_samples),
+        post_ms: summarize_metric(ctx.perf_post_samples),
+        dp_ms: summarize_metric(ctx.perf_dp_samples),
+        group_ms: summarize_metric(ctx.perf_group_samples),
+        conf_ms: summarize_metric(ctx.perf_conf_samples),
+        align_ms: summarize_metric(ctx.perf_align_samples),
+        align_ms_per_ts: summarize_metric(ctx.perf_align_per_ts_samples),
+        align_ms_per_t: summarize_metric(ctx.perf_align_per_t_samples),
+        total_ms: summarize_metric(ctx.perf_total_samples),
+        memory: ctx
+            .perf_gpu_total
+            .map(|gpu_total| perf_report_formatter::PerfAggregateMemory {
+                forward_gpu_used: summarize_metric(ctx.perf_forward_gpu_used_samples),
+                dp_gpu_used: summarize_metric(ctx.perf_dp_gpu_used_samples),
+                gpu_total,
+            }),
+    };
+    if ctx.args.perf_append {
+        if let Some(appender) = ctx.perf_jsonl_appender.take() {
+            appender.finish()?;
+        }
+        let summary_path = perf_report_formatter::summary_path_for(perf_path);
+        perf_report_formatter::write_summary_report(&summary_path, ctx.perf_config, &aggregate)?;
+        println!("{}", perf_path.display());
+        println!("{}", summary_path.display());
+    } else {
+        perf_report_formatter::write_json_report(
+            perf_path,
+            ctx.perf_config,
+            ctx.perf_records,
+            &aggregate,
+        )?;
+        println!("{}", perf_path.display());
+    }
+    if ctx.args.perf_scaling_report {
+        print_scaling_report(ctx.scaling_samples);
+    }
+    Ok(())
+}
+
+fn resolve_paths_and_validate_perf(
+    repo_root: &Path,
+    args: &Args,
+) -> Result<(PathBuf, PathBuf, Option<PathBuf>, Option<PathBuf>), String> {
+    let model_dir = resolve_path(repo_root, &args.model_dir);
+    let dataset_root = resolve_path(repo_root, &args.dataset_root);
     #[cfg(feature = "alignment-profiling")]
     if args.perf_repeats == 0 {
         return Err("--perf-repeats must be >= 1.".to_string());
     }
     let out_path = match args.output_format {
-        OutputFormat::Json => Some(resolve_out_path(&repo_root, args.out.as_ref())),
+        OutputFormat::Json => Some(resolve_out_path(repo_root, args.out.as_ref())),
         OutputFormat::TextGrid | OutputFormat::Perf => None,
     };
     #[cfg(feature = "alignment-profiling")]
     let perf_out_path = args
         .perf_out
         .as_ref()
-        .map(|path| resolve_path(&repo_root, path));
+        .map(|path| resolve_path(repo_root, path));
     #[cfg(not(feature = "alignment-profiling"))]
     let perf_out_path: Option<PathBuf> = None;
     #[cfg(feature = "alignment-profiling")]
     if args.output_format == OutputFormat::Perf && perf_out_path.is_none() {
         return Err("--output-format perf requires --perf-out.".to_string());
     }
+    Ok((model_dir, dataset_root, out_path, perf_out_path))
+}
 
-    let include_ids = load_case_filter(args.cases_file.as_ref(), &repo_root)?;
+fn load_and_filter_cases(
+    dataset_root: &Path,
+    args: &Args,
+    repo_root: &Path,
+) -> Result<Vec<Case>, String> {
+    let include_ids = load_case_filter(args.cases_file.as_ref(), repo_root)?;
     let mut cases = match args.output_format {
-        OutputFormat::Json => load_all_cases(&dataset_root)?,
+        OutputFormat::Json => load_all_cases(dataset_root)?,
         OutputFormat::TextGrid | OutputFormat::Perf => {
-            load_all_cases_from_transcripts(&dataset_root)?
+            load_all_cases_from_transcripts(dataset_root)?
         }
     };
-
     if let Some(ids) = include_ids.as_ref() {
         let known: HashSet<&str> = cases.iter().map(|case| case.id.as_str()).collect();
-        let mut missing = ids
+        let _missing: Vec<String> = ids
             .iter()
             .filter(|id| !known.contains(id.as_str()))
             .cloned()
-            .collect::<Vec<_>>();
-        missing.sort();
-
+            .collect();
         cases.retain(|case| ids.contains(&case.id));
     }
-
     if args.offset > 0 {
         cases = cases.into_iter().skip(args.offset).collect();
     }
     if let Some(limit) = args.limit {
         cases.truncate(limit);
     }
-
     if cases.is_empty() {
         return Err("No cases selected after applying filters/offset/limit.".to_string());
     }
-    let selected_case_count = cases.len();
+    Ok(cases)
+}
 
-    let aligner = build_aligner(&model_dir, &args.device, args.runtime)?;
+fn validate_frame_stride_ms(aligner: &ForcedAligner) -> Result<f64, String> {
     let frame_stride_ms = aligner.frame_stride_ms();
     if !frame_stride_ms.is_finite() {
         return Err(format!(
@@ -553,6 +683,21 @@ fn run() -> Result<(), String> {
             "aligner frame_stride_ms is out of range for report serialization: {frame_stride_ms}"
         ));
     }
+    Ok(frame_stride_ms)
+}
+
+fn run() -> Result<(), String> {
+    let args = Args::parse();
+    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+
+    let (model_dir, dataset_root, out_path, perf_out_path) =
+        resolve_paths_and_validate_perf(&repo_root, &args)?;
+
+    let cases = load_and_filter_cases(&dataset_root, &args, &repo_root)?;
+    let selected_case_count = cases.len();
+
+    let aligner = build_aligner(&model_dir, &args.device, args.runtime)?;
+    let frame_stride_ms = validate_frame_stride_ms(&aligner)?;
 
     let mut sentence_reports: Vec<SentenceReport> = Vec::with_capacity(cases.len());
     let mut predicted_by_id: HashMap<String, Vec<WordTiming>> = HashMap::with_capacity(cases.len());
@@ -729,92 +874,39 @@ fn run() -> Result<(), String> {
         avg_lib_case_ms
     );
 
-    match args.output_format {
-        OutputFormat::Json => {
-            let mut sentences = sentence_reports;
-            let aggregates = aggregate_reports(&sentences);
-            attach_outlier_traces(
-                &mut sentences,
-                &predicted_by_id,
-                &references_by_id,
-                OUTLIER_TRACE_TOP_N,
-            );
-
-            let report = Report {
-                schema_version: 1,
-                meta: Meta {
-                    generated_at: Utc::now().to_rfc3339(),
-                    model_path: model_dir.to_string_lossy().into_owned(),
-                    device: args.device,
-                    frame_stride_ms: frame_stride_ms as f32,
-                    case_count: sentences.len(),
-                },
-                sentences,
-                aggregates,
-            };
-
-            let out_path = out_path.ok_or_else(|| {
-                "internal error: missing output path for JSON report format".to_string()
-            })?;
-            json_report_formatter::write_report(&out_path, &report)?;
-            println!("{}", out_path.display());
-        }
-        OutputFormat::TextGrid => {
-            if args.textgrid_suffix.is_empty() {
-                println!(
-                    "Wrote {written_textgrids} TextGrid file(s) alongside LibriSpeech .flac files."
-                );
-            } else {
-                println!(
-                    "Wrote {written_textgrids} TextGrid file(s) with suffix '{}' alongside LibriSpeech .flac files.",
-                    args.textgrid_suffix
-                );
-            }
-        }
-        OutputFormat::Perf => {}
-    }
+    write_report_format_output(&mut ReportFormatOutputContext {
+        args: &args,
+        model_dir: &model_dir,
+        frame_stride_ms,
+        out_path: &out_path,
+        sentence_reports: &mut sentence_reports,
+        predicted_by_id: &predicted_by_id,
+        references_by_id: &references_by_id,
+        written_textgrids,
+    })?;
 
     #[cfg(feature = "alignment-profiling")]
-    if let Some(perf_path) = perf_out_path.as_ref() {
-        let aggregate = perf_report_formatter::PerfAggregateStats {
-            utterance_count: perf_total_samples.len(),
-            forward_ms: summarize_metric(&perf_forward_samples),
-            post_ms: summarize_metric(&perf_post_samples),
-            dp_ms: summarize_metric(&perf_dp_samples),
-            group_ms: summarize_metric(&perf_group_samples),
-            conf_ms: summarize_metric(&perf_conf_samples),
-            align_ms: summarize_metric(&perf_align_samples),
-            align_ms_per_ts: summarize_metric(&perf_align_per_ts_samples),
-            align_ms_per_t: summarize_metric(&perf_align_per_t_samples),
-            total_ms: summarize_metric(&perf_total_samples),
-            memory: perf_gpu_total.map(|gpu_total| perf_report_formatter::PerfAggregateMemory {
-                forward_gpu_used: summarize_metric(&perf_forward_gpu_used_samples),
-                dp_gpu_used: summarize_metric(&perf_dp_gpu_used_samples),
-                gpu_total,
-            }),
-        };
-        if args.perf_append {
-            if let Some(appender) = perf_jsonl_appender.take() {
-                appender.finish()?;
-            }
-            let summary_path = perf_report_formatter::summary_path_for(perf_path);
-            perf_report_formatter::write_summary_report(&summary_path, &perf_config, &aggregate)?;
-            println!("{}", perf_path.display());
-            println!("{}", summary_path.display());
-        } else {
-            perf_report_formatter::write_json_report(
-                perf_path,
-                &perf_config,
-                &perf_records,
-                &aggregate,
-            )?;
-            println!("{}", perf_path.display());
-        }
+    write_perf_output(&mut PerfOutputContext {
+        args: &args,
+        perf_out_path: &perf_out_path,
+        perf_config: &perf_config,
+        perf_jsonl_appender: &mut perf_jsonl_appender,
+        perf_records: &perf_records,
+        perf_total_samples: &perf_total_samples,
+        perf_forward_samples: &perf_forward_samples,
+        perf_post_samples: &perf_post_samples,
+        perf_dp_samples: &perf_dp_samples,
+        perf_group_samples: &perf_group_samples,
+        perf_conf_samples: &perf_conf_samples,
+        perf_align_samples: &perf_align_samples,
+        perf_align_per_ts_samples: &perf_align_per_ts_samples,
+        perf_align_per_t_samples: &perf_align_per_t_samples,
+        perf_forward_gpu_used_samples: &perf_forward_gpu_used_samples,
+        perf_dp_gpu_used_samples: &perf_dp_gpu_used_samples,
+        perf_gpu_total: &perf_gpu_total,
+        scaling_samples: &scaling_samples,
+    })?;
 
-        if args.perf_scaling_report {
-            print_scaling_report(&scaling_samples);
-        }
-    }
     Ok(())
 }
 

@@ -113,6 +113,26 @@ pub fn forced_align_viterbi_cpu(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec
     path
 }
 
+/// Updates (best, step) if prev[p] is in range and better than best.
+#[inline(always)]
+fn consider_transition(
+    prev: &[f32],
+    prev_start: usize,
+    prev_end: usize,
+    best: f32,
+    step: u8,
+    p: usize,
+    new_step: u8,
+) -> (f32, u8) {
+    if p >= prev_start && p <= prev_end {
+        let cand = prev[p];
+        if cand > best {
+            return (cand, new_step);
+        }
+    }
+    (best, step)
+}
+
 #[inline(always)]
 fn best_transition(
     prev: &[f32],
@@ -121,35 +141,17 @@ fn best_transition(
     prev_end: usize,
     tokens: &[usize],
 ) -> (f32, u8) {
-    let mut best = f32::NEG_INFINITY;
-    let mut step = 0u8;
-
-    if s >= prev_start && s <= prev_end {
-        best = prev[s];
-    }
-
-    if s >= 1 {
-        let p = s - 1;
-        if p >= prev_start && p <= prev_end {
-            let cand = prev[p];
-            if cand > best {
-                best = cand;
-                step = 1;
-            }
-        }
-    }
-
-    if s >= 2 && tokens[s] != tokens[s - 2] {
-        let p = s - 2;
-        if p >= prev_start && p <= prev_end {
-            let cand = prev[p];
-            if cand > best {
-                best = cand;
-                step = 2;
-            }
-        }
-    }
-
+    let (best, step) = consider_transition(prev, prev_start, prev_end, f32::NEG_INFINITY, 0, s, 0);
+    let (best, step) = if s >= 1 {
+        consider_transition(prev, prev_start, prev_end, best, step, s - 1, 1)
+    } else {
+        (best, step)
+    };
+    let (best, step) = if s >= 2 && tokens[s] != tokens[s - 2] {
+        consider_transition(prev, prev_start, prev_end, best, step, s - 2, 2)
+    } else {
+        (best, step)
+    };
     (best, step)
 }
 
