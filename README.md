@@ -314,6 +314,8 @@ cargo clippy --all-targets --features onnx -- -D warnings
 cargo test --features onnx
 ```
 
+Optional **pre-commit hooks** (format + clippy) are in `githooks/`. Enable with `git config core.hooksPath githooks` from the repo root; see [githooks/README.md](githooks/README.md).
+
 If you add CI (e.g. GitHub Actions), run these three steps as blocking jobs.
 
 ---

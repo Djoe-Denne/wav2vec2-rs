@@ -105,7 +105,7 @@ pub(super) fn expand_with_policy(
         let gap = next_start - prev_end - 1;
         if gap <= SHORT_GAP_SPLIT_MAX_FRAMES {
             // Short gaps are phonetic transitions: split at midpoint.
-            let mid = prev_end + (gap + 1) / 2;
+            let mid = prev_end + gap.div_ceil(2);
             words[i].end_frame = mid;
             words[i + 1].start_frame = mid + 1;
         } else {
