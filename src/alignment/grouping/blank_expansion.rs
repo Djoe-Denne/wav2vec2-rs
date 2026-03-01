@@ -11,12 +11,15 @@ const BALANCED_MAX_RIGHT_PULLBACK_FRAMES: usize = 6;
 const BALANCED_MIN_INTERIOR_SILENCE_FRAMES: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)] // variants used via ALL and in config_for; parent module uses them
 pub(super) enum ExpansionPolicy {
     Balanced,
     ConservativeStart,
     AggressiveTail,
 }
 
+/// ALL and as_str are used by the parent module (grouping::mod) and tests.
+#[allow(dead_code)]
 impl ExpansionPolicy {
     pub(super) const ALL: [ExpansionPolicy; 3] = [
         ExpansionPolicy::Balanced,

@@ -72,3 +72,44 @@ impl Wav2Vec2ModelConfig {
         stride_samples as f64 / sample_rate as f64 * 1000.0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wav2vec2_config_default() {
+        let config = Wav2Vec2Config::default();
+        assert!(config.model_path.is_empty());
+        assert!(config.config_path.is_empty());
+        assert!(config.vocab_path.is_empty());
+        assert_eq!(config.device, "cpu");
+        assert_eq!(
+            config.expected_sample_rate_hz,
+            Wav2Vec2Config::DEFAULT_SAMPLE_RATE_HZ
+        );
+        assert_eq!(config.expected_sample_rate_hz, 16_000);
+    }
+
+    #[test]
+    fn model_config_frame_stride_ms() {
+        let json = r#"{
+            "hidden_size": 768,
+            "num_hidden_layers": 12,
+            "num_attention_heads": 12,
+            "intermediate_size": 3072,
+            "conv_dim": [512],
+            "conv_kernel": [10],
+            "conv_stride": [2, 2, 2, 2, 2],
+            "num_conv_pos_embeddings": 128,
+            "num_conv_pos_embedding_groups": 16,
+            "pad_token_id": 0,
+            "vocab_size": 32
+        }"#;
+        let model_config: Wav2Vec2ModelConfig =
+            serde_json::from_str(json).expect("valid config json");
+        // stride product = 32, 32 / 16000 * 1000 = 2.0 ms
+        let stride_ms = model_config.frame_stride_ms(16_000);
+        assert!((stride_ms - 2.0).abs() < 1e-9);
+    }
+}

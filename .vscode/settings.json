@@ -1,0 +1,6 @@
+{
+    "sonarlint.connectedMode.project": {
+        "connectionId": "djoe-denne06",
+        "projectKey": "Djoe-Denne_wav2vec2-rs"
+    }
+}

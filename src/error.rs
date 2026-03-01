@@ -45,3 +45,47 @@ impl AlignmentError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error;
+
+    #[test]
+    fn io_error_constructor_and_display() {
+        let source = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let err = AlignmentError::io("reading model", source);
+        let display = err.to_string();
+        assert!(display.contains("I/O error"));
+        assert!(display.contains("reading model"));
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn json_error_constructor_and_display() {
+        let source = serde_json::from_str::<()>("{").unwrap_err();
+        let err = AlignmentError::json("parse config.json", source);
+        let display = err.to_string();
+        assert!(display.contains("JSON parse error"));
+        assert!(display.contains("parse config.json"));
+        assert!(err.source().is_some());
+    }
+
+    #[test]
+    fn runtime_error_constructor_and_display() {
+        let err = AlignmentError::runtime("alignment", "buffer too short");
+        let display = err.to_string();
+        assert!(display.contains("alignment"));
+        assert!(display.contains("buffer too short"));
+        assert!(err.source().is_none());
+    }
+
+    #[test]
+    fn invalid_input_constructor_and_display() {
+        let err = AlignmentError::invalid_input("sample rate must be 16000");
+        let display = err.to_string();
+        assert!(display.contains("invalid input"));
+        assert!(display.contains("sample rate must be 16000"));
+        assert!(err.source().is_none());
+    }
+}

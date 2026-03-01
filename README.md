@@ -229,8 +229,7 @@ src/
 │   ├── tokenization.rs         # Case-aware CTC token sequence builder (blank-interleaved)
 │   ├── grouping/
 │   │   ├── path_to_words.rs    # Phase 1: walk Viterbi path → raw word boundaries
-│   │   ├── blank_expansion.rs  # Phase 2: expand boundaries into blank frames (3 policies)
-│   │   ├── candidate_selector.rs # Phase 3: score candidates, pick best expansion
+│   │   ├── blank_expansion.rs  # Phase 2: expand boundaries (Balanced policy)
 │   │   └── mod.rs              # Orchestration, quality confidence, calibration
 │   └── report.rs               # Evaluation: structural/timing/confidence metrics
 ├── model/

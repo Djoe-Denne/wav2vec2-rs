@@ -290,3 +290,45 @@ fn confidence_is_stable_across_repeated_state_holds() {
     assert_eq!(short_words[0].confidence_stats.coverage_frame_count, 1);
     assert_eq!(long_words[0].confidence_stats.coverage_frame_count, 5);
 }
+
+#[test]
+fn selector_returns_none_for_empty_candidates() {
+    let raw = vec![make_raw("A", 10, 20)];
+    let log_probs = make_uniform_log_probs(30, 4);
+    let selected = select_best(&raw, vec![], &log_probs, 0);
+    assert!(selected.is_none());
+}
+
+#[test]
+fn selector_returns_single_candidate() {
+    let raw = vec![make_raw("A", 5, 10), make_raw("B", 25, 30)];
+    let candidate = expand_with_policy(raw.clone(), 0, 40, ExpansionPolicy::AggressiveTail);
+    let candidates = vec![(ExpansionPolicy::AggressiveTail, candidate)];
+    let log_probs = make_uniform_log_probs(50, 4);
+    let selected = select_best(&raw, candidates, &log_probs, 0).expect("one candidate");
+    assert_eq!(selected.policy, ExpansionPolicy::AggressiveTail);
+}
+
+#[test]
+fn expand_conservative_start_large_gap_frame_bounds() {
+    // ConservativeStart: max_left=10, max_right=2, min_interior_silence=6.
+    // Gap 25 (11..35): absorb_budget=19, left_take=10, right_take=2.
+    let words = vec![make_raw("A", 5, 10), make_raw("B", 36, 41)];
+    let result = expand_with_policy(words, 0, 50, ExpansionPolicy::ConservativeStart);
+    assert_eq!(result[0].start_frame, 5);
+    assert_eq!(result[0].end_frame, 20); // 10 + 10
+    assert_eq!(result[1].start_frame, 34); // 36 - 2
+    assert_eq!(result[1].end_frame, 41);
+}
+
+#[test]
+fn expand_aggressive_tail_large_gap_frame_bounds() {
+    // AggressiveTail: max_left=16, max_right=4, min_interior_silence=2.
+    // Gap 25 (11..35): absorb_budget=23, left_take=16, right_take=4.
+    let words = vec![make_raw("A", 5, 10), make_raw("B", 36, 41)];
+    let result = expand_with_policy(words, 0, 50, ExpansionPolicy::AggressiveTail);
+    assert_eq!(result[0].start_frame, 5);
+    assert_eq!(result[0].end_frame, 26); // 10 + 16
+    assert_eq!(result[1].start_frame, 32); // 36 - 4
+    assert_eq!(result[1].end_frame, 41);
+}
