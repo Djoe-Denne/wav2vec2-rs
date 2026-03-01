@@ -77,7 +77,7 @@ index 543ab52..8111740 100644
      waveform_to_frame_ratio = wav.size(1) / num_frames
      tg = create_text_grid_from_segments(
 diff --git a/aligner/heavy.py b/aligner/heavy.py
-index 7d597f8..0585a29 100644
+index 7d597f8..d3aea1d 100644
 --- a/aligner/heavy.py
 +++ b/aligner/heavy.py
 @@ -3,6 +3,9 @@ Utility functions that require expensive imports. Don't import from cli until ne
@@ -86,7 +86,7 @@ index 7d597f8..0585a29 100644
  import re
 +import statistics
 +import time
-+from typing import Any, Dict, List, Tuple
++from typing import Any, Dict, List, Optional, Tuple
  
  import torch
  
@@ -104,7 +104,7 @@ index 7d597f8..0585a29 100644
      model = bundle.get_model()
      labels = {l.lower(): i for i, l in enumerate(bundle.get_labels())}
      del labels["-"]  # Remove blank token
-@@ -39,16 +45,207 @@ def align_speech_file(
+@@ -39,16 +45,285 @@ def align_speech_file(
      return segments, words, sentences, emission.size(1)
  
  
@@ -244,6 +244,9 @@ index 7d597f8..0585a29 100644
 +    duration_ms = int(1000.0 * audio.size(1) / sample_rate)
 +    align_ms = _aggregate(align_ms_repeats, aggregate)
 +
++    memory_result = collect_per_stage_memory(
++        audio, text_hash, model, labels_dictionary, word_padding, sentence_padding
++    )
 +    perf_dict = {
 +        "utterance_id": utterance_id,
 +        "audio_path": audio_path,
@@ -274,6 +277,7 @@ index 7d597f8..0585a29 100644
 +        "conf_ms_repeats": conf_ms_repeats,
 +        "align_ms_repeats": align_ms_repeats,
 +        "total_ms_repeats": total_ms_repeats,
++        "memory": memory_result,
 +    }
 +    return (
 +        perf_dict,
@@ -302,6 +306,78 @@ index 7d597f8..0585a29 100644
 +def _maybe_cuda_sync(device):
 +    if device.type == "cuda":
 +        torch.cuda.synchronize(device)
++
++
++def _reset_peak_memory(device: torch.device) -> None:
++    """Reset CUDA peak memory stats so next read reflects only this stage."""
++    if device.type == "cuda" and hasattr(torch.cuda, "reset_peak_memory_stats"):
++        torch.cuda.reset_peak_memory_stats(device)
++
++
++def _read_stage_memory(device: torch.device) -> Dict[str, int]:
++    """Return current process memory: cpu (RSS), gpu_alloc, gpu_reserved in bytes."""
++    cpu_rss = 0
++    try:
++        import psutil
++        cpu_rss = psutil.Process().memory_info().rss
++    except Exception:
++        pass
++    gpu_alloc = 0
++    gpu_reserved = 0
++    if device.type == "cuda":
++        if hasattr(torch.cuda, "max_memory_allocated"):
++            gpu_alloc = torch.cuda.max_memory_allocated(device)
++        if hasattr(torch.cuda, "max_memory_reserved"):
++            gpu_reserved = torch.cuda.max_memory_reserved(device)
++    return {"cpu": cpu_rss, "gpu_alloc": gpu_alloc, "gpu_reserved": gpu_reserved}
++
++
++def collect_per_stage_memory(
++    audio,
++    text_hash,
++    model,
++    labels_dictionary,
++    word_padding,
++    sentence_padding,
++) -> Optional[Dict[str, Dict[str, int]]]:
++    """
++    Run one alignment with per-stage memory sampling. Returns a dict matching Rust shape:
++    {"forward": {cpu, gpu_alloc, gpu_reserved}, "post", "dp", "group", "conf"} in bytes.
++    Returns None on failure.
++    """
++    try:
++        device = DEVICE
++        waveform = audio.to(device)
++
++        _reset_peak_memory(device)
++        logits = get_logits(model, waveform)
++        _maybe_cuda_sync(device)
++        forward_mem = _read_stage_memory(device)
++
++        _reset_peak_memory(device)
++        emission = torch.log_softmax(logits, dim=-1)
++        _maybe_cuda_sync(device)
++        post_mem = _read_stage_memory(device)
++
++        _, _, _, _, align_memory = compute_alignments(
++            text_hash,
++            labels_dictionary,
++            emission,
++            word_padding=word_padding,
++            sentence_padding=sentence_padding,
++            return_timings=False,
++            return_memory=True,
++            device=device,
++        )
++        return {
++            "forward": forward_mem,
++            "post": post_mem,
++            "dp": align_memory["dp"],
++            "group": align_memory["group"],
++            "conf": align_memory["conf"],
++        }
++    except Exception:
++        return None
  
  
  def compute_alignments(
@@ -312,13 +388,19 @@ index 7d597f8..0585a29 100644
 +    word_padding=0,
 +    sentence_padding=0,
 +    return_timings=False,
++    return_memory=False,
++    device=None,
  ):
      all_words = [
          v["text"].output_string for k, v in transcript_hash.items() if "w" in k
-@@ -59,13 +256,26 @@ def compute_alignments(
+@@ -59,13 +334,38 @@ def compute_alignments(
      input_lengths = torch.tensor([emission.shape[1]], device=emission.device)
      target_lengths = torch.tensor([targets.shape[1]], device=emission.device)
  
++    align_memory = {} if return_memory else None
++    if return_memory and device is not None:
++        _reset_peak_memory(device)
++
 +    # dp: forced_align only
 +    if return_timings:
 +        _maybe_cuda_sync(emission.device)
@@ -330,6 +412,10 @@ index 7d597f8..0585a29 100644
 +        _maybe_cuda_sync(emission.device)
 +        dp_ms = (time.perf_counter() - dp_started) * 1000.0
 +        conf_started = time.perf_counter()
++    if return_memory and device is not None:
++        _maybe_cuda_sync(device)
++        align_memory["dp"] = _read_stage_memory(device)
++        _reset_peak_memory(device)
  
      scores = scores.exp()  # convert back to probability
      alignment, scores = alignment[0].tolist(), scores[0].tolist()
@@ -338,27 +424,36 @@ index 7d597f8..0585a29 100644
 +        _maybe_cuda_sync(emission.device)
 +        conf_ms = (time.perf_counter() - conf_started) * 1000.0
 +        group_started = time.perf_counter()
++    if return_memory and device is not None:
++        _maybe_cuda_sync(device)
++        align_memory["conf"] = _read_stage_memory(device)
++        _reset_peak_memory(device)
 +
      assert len(alignment) == len(scores) == emission.size(1)
      token_index = -1
      prev_hyp = 0
-@@ -152,6 +362,10 @@ def compute_alignments(
+@@ -152,6 +452,15 @@ def compute_alignments(
                  end + sentence_padding,
                  sum(scores) / len(scores),
              )
 +    if return_timings:
 +        group_ms = (time.perf_counter() - group_started) * 1000.0
++    if return_memory and device is not None:
++        _maybe_cuda_sync(device)
++        align_memory["group"] = _read_stage_memory(device)
      words = [v for k, v in transcript_hash.items() if "w" in k]
      sentences = [v for k, v in transcript_hash.items() if "w" not in k]
 +    if return_timings:
 +        return segments, words, sentences, {"dp_ms": dp_ms, "group_ms": group_ms, "conf_ms": conf_ms}
++    if return_memory:
++        return segments, words, sentences, None, align_memory
      return segments, words, sentences
 diff --git a/aligner/perf_record.py b/aligner/perf_record.py
 new file mode 100644
-index 0000000..b36de01
+index 0000000..1b865c2
 --- /dev/null
 +++ b/aligner/perf_record.py
-@@ -0,0 +1,175 @@
+@@ -0,0 +1,193 @@
 +"""
 +RustPerfRecord schema for 1:1 performance comparison with Rust implementation.
 +"""
@@ -418,11 +513,25 @@ index 0000000..b36de01
 +    align_ms_repeats: List[float]
 +    total_ms_repeats: List[float]
 +
++    # Per-stage peak memory (bytes); present only when benchmark ran with memory profiling
++    memory: Optional[Dict[str, Dict[str, int]]] = None  # e.g. {"forward": {"cpu": X, "gpu_alloc": Y, "gpu_reserved": Z}, ...}
++
 +    @staticmethod
 +    def _require(obj: Dict[str, Any], key: str) -> Any:
 +        if key not in obj:
 +            raise KeyError(f"Missing key: {key}")
 +        return obj[key]
++
++    @staticmethod
++    def _optional_memory(value: Any) -> Optional[Dict[str, Dict[str, int]]]:
++        """Parse optional memory field from JSON (stage -> {cpu, gpu_alloc, gpu_reserved} in bytes)."""
++        if value is None or not isinstance(value, dict):
++            return None
++        return {
++            stage: {k: int(v) for k, v in inner.items() if isinstance(v, (int, float))}
++            for stage, inner in value.items()
++            if isinstance(inner, dict)
++        }
 +
 +    @classmethod
 +    def from_dict(cls, obj: Dict[str, Any]) -> "RustPerfRecord":
@@ -457,6 +566,7 @@ index 0000000..b36de01
 +            conf_ms_repeats=[float(x) for x in cls._require(obj, "conf_ms_repeats")],
 +            align_ms_repeats=[float(x) for x in cls._require(obj, "align_ms_repeats")],
 +            total_ms_repeats=[float(x) for x in cls._require(obj, "total_ms_repeats")],
++            memory=cls._optional_memory(obj.get("memory")),
 +        )
 +
 +    def validate(self) -> None:
@@ -489,7 +599,7 @@ index 0000000..b36de01
 +
 +    def to_dict(self) -> Dict[str, Any]:
 +        """Serialize to dict for NDJSON output."""
-+        return {
++        out: Dict[str, Any] = {
 +            "utterance_id": self.utterance_id,
 +            "audio_path": self.audio_path,
 +            "duration_ms": self.duration_ms,
@@ -520,6 +630,9 @@ index 0000000..b36de01
 +            "align_ms_repeats": self.align_ms_repeats,
 +            "total_ms_repeats": self.total_ms_repeats,
 +        }
++        if self.memory is not None:
++            out["memory"] = self.memory
++        return out
 +
 +
 +def load_rust_perf_ndjson(path: str) -> List[RustPerfRecord]:
