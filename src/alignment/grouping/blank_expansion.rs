@@ -103,14 +103,21 @@ pub(super) fn expand_with_policy(
             continue;
         }
         let gap = next_start - prev_end - 1;
-        let min_silence = config.min_interior_silence_frames.min(gap);
-        let absorb_budget = gap.saturating_sub(min_silence);
-        let left_take = absorb_budget.min(config.max_left_expansion_frames);
-        let right_take = absorb_budget
-            .saturating_sub(left_take)
-            .min(config.max_right_pullback_frames);
-        words[i].end_frame = prev_end + left_take;
-        words[i + 1].start_frame = next_start - right_take;
+        if gap <= SHORT_GAP_SPLIT_MAX_FRAMES {
+            // Short gaps are phonetic transitions: split at midpoint.
+            let mid = prev_end + (gap + 1) / 2;
+            words[i].end_frame = mid;
+            words[i + 1].start_frame = mid + 1;
+        } else {
+            let min_silence = config.min_interior_silence_frames.min(gap);
+            let absorb_budget = gap.saturating_sub(min_silence);
+            let left_take = absorb_budget.min(config.max_left_expansion_frames);
+            let right_take = absorb_budget
+                .saturating_sub(left_take)
+                .min(config.max_right_pullback_frames);
+            words[i].end_frame = prev_end + left_take;
+            words[i + 1].start_frame = next_start - right_take;
+        }
     }
 
     words

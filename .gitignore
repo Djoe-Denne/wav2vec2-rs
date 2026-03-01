@@ -16,7 +16,7 @@ __pycache__/
 models/
 tests/test_settings.json
 test-data/
-!*.TextGrid
+#!*.TextGrid
 *.flac
 
 .venv/

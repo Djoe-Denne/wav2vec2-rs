@@ -47,11 +47,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
 
-      - name: Install llvm-cov
-        run: cargo install cargo-llvm-cov --locked
+      - uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Generate coverage
+      - name: Coverage
         run: cargo llvm-cov --workspace --features onnx --lcov --output-path lcov.info
 
       - name: Upload lcov artifact
