@@ -48,7 +48,6 @@ jobs:
     needs: [test]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -77,6 +76,8 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: lcov
+
+      - uses: dtolnay/rust-toolchain@stable
 
       - uses: SonarSource/sonarcloud-github-action@v3
         env:
