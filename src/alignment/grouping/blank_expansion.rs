@@ -6,8 +6,6 @@ use super::RawWord;
 /// silence stays unattributed — matching MFA's explicit silence intervals.
 #[allow(dead_code)]
 pub(super) const MAX_EXPANSION_FRAMES: usize = 10;
-#[allow(dead_code)]
-const SHORT_GAP_SPLIT_MAX_FRAMES: usize = 2 * MAX_EXPANSION_FRAMES;
 const BALANCED_MAX_LEFT_EXPANSION_FRAMES: usize = 12;
 const BALANCED_MAX_RIGHT_PULLBACK_FRAMES: usize = 6;
 const BALANCED_MIN_INTERIOR_SILENCE_FRAMES: usize = 4;
@@ -103,21 +101,14 @@ pub(super) fn expand_with_policy(
             continue;
         }
         let gap = next_start - prev_end - 1;
-        if gap <= SHORT_GAP_SPLIT_MAX_FRAMES {
-            // Short gaps are phonetic transitions: split at midpoint.
-            let mid = prev_end + gap.div_ceil(2);
-            words[i].end_frame = mid;
-            words[i + 1].start_frame = mid + 1;
-        } else {
-            let min_silence = config.min_interior_silence_frames.min(gap);
-            let absorb_budget = gap.saturating_sub(min_silence);
-            let left_take = absorb_budget.min(config.max_left_expansion_frames);
-            let right_take = absorb_budget
-                .saturating_sub(left_take)
-                .min(config.max_right_pullback_frames);
-            words[i].end_frame = prev_end + left_take;
-            words[i + 1].start_frame = next_start - right_take;
-        }
+        let min_silence = config.min_interior_silence_frames.min(gap);
+        let absorb_budget = gap.saturating_sub(min_silence);
+        let left_take = absorb_budget.min(config.max_left_expansion_frames);
+        let right_take = absorb_budget
+            .saturating_sub(left_take)
+            .min(config.max_right_pullback_frames);
+        words[i].end_frame = prev_end + left_take;
+        words[i + 1].start_frame = next_start - right_take;
     }
 
     words
