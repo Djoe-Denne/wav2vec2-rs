@@ -152,3 +152,127 @@ fn best_transition(
 
     (best, step)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_log_probs(
+        t_len: usize,
+        vocab_size: usize,
+        path: &[(usize, usize)],
+        tokens: &[usize],
+    ) -> Vec<Vec<f32>> {
+        let low: f32 = -10.0;
+        let high: f32 = 0.0;
+        let mut log_probs = vec![vec![low; vocab_size]; t_len];
+        for (s, t) in path {
+            if *t < t_len && *s < tokens.len() {
+                let tid = tokens[*s];
+                if tid < vocab_size {
+                    log_probs[*t][tid] = high;
+                }
+            }
+        }
+        log_probs
+    }
+
+    #[test]
+    fn empty_log_probs_returns_empty_path() {
+        let path = forced_align_viterbi_cpu(&[], &[0]);
+        assert!(path.is_empty());
+    }
+
+    #[test]
+    fn empty_tokens_returns_empty_path() {
+        let path = forced_align_viterbi_cpu(&[vec![0.0f32; 4]], &[]);
+        assert!(path.is_empty());
+    }
+
+    #[test]
+    fn single_frame_single_token() {
+        let log_probs = vec![vec![0.0f32, -10.0, -10.0]];
+        let tokens = vec![0];
+        let path = forced_align_viterbi_cpu(&log_probs, &tokens);
+        assert_eq!(path.len(), 1);
+        assert_eq!(path[0], (0, 0));
+    }
+
+    #[test]
+    fn two_frames_two_tokens_straight_path() {
+        let log_probs = vec![vec![0.0f32, -10.0, -10.0], vec![-10.0, 0.0f32, -10.0]];
+        let tokens = vec![0, 1];
+        let path = forced_align_viterbi_cpu(&log_probs, &tokens);
+        assert_eq!(path.len(), 2);
+        assert_eq!(path[0], (0, 0));
+        assert_eq!(path[1], (1, 1));
+        assert!(path[0].1 <= path[1].1);
+    }
+
+    #[test]
+    fn s_len_one() {
+        let t_len = 4;
+        let vocab_size = 4;
+        let tokens = vec![0];
+        let path_states = vec![(0, 0), (0, 1), (0, 2), (0, 3)];
+        let log_probs = make_log_probs(t_len, vocab_size, &path_states, &tokens);
+        let path = forced_align_viterbi_cpu(&log_probs, &tokens);
+        assert_eq!(path.len(), t_len);
+        for (i, &(s, t)) in path.iter().enumerate() {
+            assert_eq!(s, 0);
+            assert_eq!(t, i);
+        }
+    }
+
+    #[test]
+    fn backtrack_step_one() {
+        let tokens = vec![0, 1];
+        let log_probs = vec![vec![0.0f32, -10.0], vec![-10.0, 0.0f32]];
+        let path = forced_align_viterbi_cpu(&log_probs, &tokens);
+        assert_eq!(path.len(), 2);
+        assert_eq!(path[0].1, 0);
+        assert_eq!(path[1].1, 1);
+    }
+
+    #[test]
+    fn backtrack_step_two() {
+        let tokens = vec![0, 1, 2];
+        let log_probs = vec![
+            vec![0.0f32, -10.0, -10.0],
+            vec![0.0f32, -10.0, -10.0],
+            vec![-10.0, -10.0, 0.0f32],
+        ];
+        let path = forced_align_viterbi_cpu(&log_probs, &tokens);
+        assert_eq!(path.len(), 3);
+        assert_eq!(path[0], (0, 0));
+        assert_eq!(path[1], (0, 1));
+        assert_eq!(path[2], (2, 2));
+    }
+
+    #[test]
+    fn final_state_prefer_s_len_minus_2() {
+        let tokens = vec![0, 1, 2];
+        let log_probs = vec![
+            vec![0.0f32, -10.0, -10.0],
+            vec![-10.0, 0.0f32, -10.0],
+            vec![-10.0, 0.0f32, -10.0],
+            vec![-100.0, 0.0f32, -100.0],
+        ];
+        let path = forced_align_viterbi_cpu(&log_probs, &tokens);
+        assert_eq!(path.len(), 4);
+        assert_eq!(
+            path[3],
+            (1, 3),
+            "last state should prefer s_len-2 when prev[1] > prev[2]"
+        );
+    }
+
+    #[test]
+    fn forced_align_viterbi_cpu_path_equals_public() {
+        let log_probs = vec![vec![0.0f32, -10.0], vec![-10.0, 0.0f32]];
+        let tokens = vec![0, 1];
+        let cpu_path = forced_align_viterbi_cpu(&log_probs, &tokens);
+        let pub_path = forced_align_viterbi(&log_probs, &tokens);
+        assert_eq!(cpu_path, pub_path);
+    }
+}

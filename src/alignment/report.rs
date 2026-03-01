@@ -1040,6 +1040,8 @@ fn checked_f32(value: f64, metric_name: &str) -> Result<f32, AlignmentError> {
 
 #[cfg(test)]
 mod tests {
+    use crate::types::{WordConfidenceStats, WordTiming};
+
     use super::*;
 
     #[allow(clippy::too_many_arguments)]
@@ -1111,6 +1113,241 @@ mod tests {
             (actual - expected).abs() < 1e-4,
             "actual={actual} expected={expected}"
         );
+    }
+
+    fn word_timing(
+        word: &str,
+        start_ms: u64,
+        end_ms: u64,
+        confidence: Option<f32>,
+        coverage_frame_count: u32,
+    ) -> WordTiming {
+        WordTiming {
+            word: word.to_string(),
+            start_ms,
+            end_ms,
+            confidence,
+            confidence_stats: WordConfidenceStats {
+                geo_mean_prob: confidence,
+                coverage_frame_count,
+                ..WordConfidenceStats::default()
+            },
+        }
+    }
+
+    fn reference_word(word: &str, start_ms: u64, end_ms: u64) -> ReferenceWord {
+        ReferenceWord {
+            word: word.to_string(),
+            start_ms,
+            end_ms,
+        }
+    }
+
+    #[test]
+    fn infer_split_test_clean() {
+        assert_eq!(infer_split("path/test-clean/123"), Split::Clean);
+        assert_eq!(infer_split("TEST-CLEAN"), Split::Clean);
+    }
+
+    #[test]
+    fn infer_split_test_other() {
+        assert_eq!(infer_split("path/test-other/456"), Split::Other);
+    }
+
+    #[test]
+    fn infer_split_unknown() {
+        assert_eq!(infer_split("other"), Split::Unknown);
+        assert_eq!(infer_split("train"), Split::Unknown);
+        assert_eq!(infer_split(""), Split::Unknown);
+    }
+
+    #[test]
+    fn compute_sentence_report_with_reference_one_word() {
+        let pred = word_timing("Hello", 0, 100, Some(0.9), 5);
+        let ref_word = reference_word("Hello", 0, 100);
+        let r =
+            compute_sentence_report("id1", Split::Clean, &[pred], Some(&[ref_word]), 1000).unwrap();
+        assert!(r.has_reference);
+        assert!(r.structural.negative_duration_word_count == 0);
+        assert!(r.confidence.is_some());
+        assert!(r.timing.is_some());
+    }
+
+    #[test]
+    fn compute_sentence_report_without_reference() {
+        let pred = word_timing("Hi", 0, 50, Some(0.8), 3);
+        let r = compute_sentence_report("id2", Split::Other, &[pred], None, 1000).unwrap();
+        assert!(!r.has_reference);
+        assert!(r.notes.contains(&"reference_missing".to_string()));
+    }
+
+    #[test]
+    fn compute_sentence_report_empty_predicted() {
+        let r = compute_sentence_report("id3", Split::Clean, &[], None, 1000).unwrap();
+        assert!(r.notes.contains(&"no_predicted_words".to_string()));
+    }
+
+    #[test]
+    fn compute_sentence_report_empty_reference_words() {
+        let pred = word_timing("Hi", 0, 50, Some(0.8), 3);
+        let r = compute_sentence_report("id4", Split::Clean, &[pred], Some(&[]), 1000).unwrap();
+        assert!(r.has_reference);
+        assert!(r.notes.iter().any(|n| n == "empty_reference_words"));
+    }
+
+    #[test]
+    fn compute_sentence_report_word_count_mismatch() {
+        let pred1 = word_timing("A", 0, 50, Some(0.8), 2);
+        let pred2 = word_timing("B", 50, 100, Some(0.8), 2);
+        let ref_w = reference_word("A", 0, 50);
+        let r = compute_sentence_report("id5", Split::Clean, &[pred1, pred2], Some(&[ref_w]), 1000)
+            .unwrap();
+        assert!(r.notes.iter().any(|n| n.starts_with("word_count_mismatch")));
+    }
+
+    #[test]
+    fn compute_sentence_report_word_label_mismatch() {
+        let pred = word_timing("Hi", 0, 50, Some(0.8), 2);
+        let ref_w = reference_word("Bye", 0, 50);
+        let r =
+            compute_sentence_report("id6", Split::Clean, &[pred], Some(&[ref_w]), 1000).unwrap();
+        assert!(r
+            .notes
+            .iter()
+            .any(|n| n.starts_with("word_label_mismatches")));
+    }
+
+    #[test]
+    fn compute_sentence_report_invalid_confidence() {
+        let pred = word_timing("Hi", 0, 50, None, 0);
+        let r = compute_sentence_report("id7", Split::Clean, &[pred], None, 1000).unwrap();
+        assert!(r.structural.invalid_confidence_word_count > 0);
+        assert!(r
+            .notes
+            .iter()
+            .any(|n| n.starts_with("invalid_confidence_words")));
+    }
+
+    #[test]
+    fn compute_sentence_report_negative_duration() {
+        let pred = word_timing("Hi", 50, 50, Some(0.8), 2);
+        let r = compute_sentence_report("id8", Split::Clean, &[pred], None, 1000).unwrap();
+        assert!(r.structural.negative_duration_word_count > 0);
+    }
+
+    #[test]
+    fn compute_sentence_report_overlap() {
+        let p1 = word_timing("A", 0, 100, Some(0.8), 2);
+        let p2 = word_timing("B", 50, 150, Some(0.8), 2);
+        let r = compute_sentence_report("id9", Split::Clean, &[p1, p2], None, 1000).unwrap();
+        assert!(r.structural.overlap_word_count > 0);
+    }
+
+    #[test]
+    fn compute_sentence_report_timing_paired_len_zero() {
+        let r = compute_sentence_report("id10", Split::Clean, &[], Some(&[]), 1000).unwrap();
+        assert!(r
+            .notes
+            .iter()
+            .any(|n| n == "no_aligned_word_pairs_for_timing"));
+        assert!(r.timing.is_some());
+        let t = r.timing.unwrap();
+        assert_eq!(t.abs_err_ms_median, 0.0);
+        assert_eq!(t.abs_err_ms_p90, 0.0);
+    }
+
+    #[test]
+    fn attach_outlier_traces_populates_top_outlier() {
+        let mut sentences = vec![
+            sample_sentence(
+                "a",
+                Split::Clean,
+                5_000,
+                2,
+                200.0,
+                2.0,
+                0.2,
+                vec![100.0, 150.0],
+            ),
+            sample_sentence(
+                "b",
+                Split::Clean,
+                5_000,
+                2,
+                50.0,
+                2.0,
+                0.2,
+                vec![20.0, 30.0],
+            ),
+        ];
+        let pred_a = vec![
+            word_timing("one", 0, 100, Some(0.9), 2),
+            word_timing("two", 100, 200, Some(0.9), 2),
+        ];
+        let pred_b = vec![
+            word_timing("one", 0, 80, Some(0.9), 2),
+            word_timing("two", 80, 180, Some(0.9), 2),
+        ];
+        let ref_a = vec![
+            reference_word("one", 0, 100),
+            reference_word("two", 100, 200),
+        ];
+        let ref_b = vec![reference_word("one", 0, 80), reference_word("two", 80, 180)];
+        let mut predicted_by_id = HashMap::new();
+        predicted_by_id.insert("a".to_string(), pred_a);
+        predicted_by_id.insert("b".to_string(), pred_b);
+        let mut references_by_id = HashMap::new();
+        references_by_id.insert("a".to_string(), ref_a);
+        references_by_id.insert("b".to_string(), ref_b);
+        attach_outlier_traces(&mut sentences, &predicted_by_id, &references_by_id, 1);
+        let worst = sentences.iter().find(|s| s.id == "a").unwrap();
+        assert!(worst.per_word.is_some());
+        assert_eq!(worst.per_word.as_ref().unwrap().len(), 2);
+        let other = sentences.iter().find(|s| s.id == "b").unwrap();
+        assert!(other.per_word.is_none());
+    }
+
+    #[test]
+    fn percentile_sorted_empty_and_single() {
+        let empty: [f64; 0] = [];
+        assert_eq!(percentile_sorted(&empty, 0.5), 0.0);
+        assert_eq!(percentile_sorted(&[42.0], 0.5), 42.0);
+    }
+
+    #[test]
+    fn normalize_word_for_comparison_trim_and_upper() {
+        assert_eq!(normalize_word_for_comparison("  hi  "), "HI");
+        assert_eq!(normalize_word_for_comparison("<UNK>"), "UNK");
+        assert_eq!(normalize_word_for_comparison("unk"), "UNK");
+    }
+
+    #[test]
+    fn to_u32_valid() {
+        assert_eq!(to_u32(0), 0);
+        assert_eq!(to_u32(100), 100);
+    }
+
+    #[test]
+    fn distribution_or_none_empty_and_non_empty() {
+        assert!(distribution_or_none(&[]).is_none());
+        let vals = [1.0, 2.0, 3.0];
+        let d = distribution_or_none(&vals).expect("some");
+        assert!(d.p50 >= 1.0 && d.p50 <= 3.0);
+        assert!(d.p90 >= 1.0 && d.p90 <= 3.0);
+    }
+
+    #[test]
+    fn checked_f32_rejects_non_finite() {
+        let err = checked_f32(f64::NAN, "x").unwrap_err();
+        assert!(err.to_string().contains("non-finite") || err.to_string().contains("x"));
+        let err = checked_f32(f64::INFINITY, "y").unwrap_err();
+        assert!(err.to_string().contains("non-finite") || err.to_string().contains("y"));
+    }
+
+    #[test]
+    fn checked_f32_rejects_out_of_range() {
+        let err = checked_f32(f64::MAX, "z").unwrap_err();
+        assert!(err.to_string().contains("range") || err.to_string().contains("z"));
     }
 
     #[test]

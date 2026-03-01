@@ -75,6 +75,8 @@ impl Wav2Vec2ModelConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
+
     use super::*;
 
     #[test]
@@ -111,5 +113,71 @@ mod tests {
         // stride product = 32, 32 / 16000 * 1000 = 2.0 ms
         let stride_ms = model_config.frame_stride_ms(16_000);
         assert!((stride_ms - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn model_config_load_success() {
+        let json = r#"{
+            "hidden_size": 768,
+            "num_hidden_layers": 12,
+            "num_attention_heads": 12,
+            "intermediate_size": 3072,
+            "conv_dim": [512],
+            "conv_kernel": [10],
+            "conv_stride": [2, 2, 2, 2, 2],
+            "num_conv_pos_embeddings": 128,
+            "num_conv_pos_embedding_groups": 16,
+            "pad_token_id": 0,
+            "vocab_size": 32
+        }"#;
+        let path = std::env::temp_dir().join("wav2vec2_rs_config_test.json");
+        let mut f = std::fs::File::create(&path).expect("create temp file");
+        f.write_all(json.as_bytes()).expect("write config");
+        f.sync_all().ok();
+
+        let cfg = Wav2Vec2ModelConfig::load(&path).expect("load should succeed");
+        assert_eq!(cfg.hidden_size, 768);
+        assert_eq!(cfg.conv_stride, [2, 2, 2, 2, 2]);
+        assert!((cfg.frame_stride_ms(16_000) - 2.0).abs() < 1e-9);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn model_config_load_missing_file() {
+        let path = std::path::Path::new("/nonexistent/path/config.json");
+        let err = Wav2Vec2ModelConfig::load(path).expect_err("load should fail");
+        assert!(err.to_string().contains("config.json") || err.to_string().contains("read"));
+    }
+
+    #[test]
+    fn model_config_load_invalid_json() {
+        let path = std::env::temp_dir().join("wav2vec2_rs_config_invalid_test.json");
+        std::fs::write(&path, "not valid json").expect("write");
+        let err = Wav2Vec2ModelConfig::load(&path).expect_err("load should fail");
+        assert!(err.to_string().contains("parse") || err.to_string().contains("json"));
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn model_config_deserialize_defaults() {
+        let json = r#"{
+            "hidden_size": 768,
+            "num_hidden_layers": 12,
+            "num_attention_heads": 12,
+            "intermediate_size": 3072,
+            "conv_dim": [512],
+            "conv_kernel": [10],
+            "conv_stride": [2, 2, 2, 2, 2],
+            "num_conv_pos_embeddings": 128,
+            "num_conv_pos_embedding_groups": 16,
+            "pad_token_id": 0,
+            "vocab_size": 32
+        }"#;
+        let cfg: Wav2Vec2ModelConfig = serde_json::from_str(json).expect("valid json");
+        assert!(!cfg.do_stable_layer_norm);
+        assert!((cfg.layer_norm_eps - 1e-5).abs() < 1e-15);
+        assert_eq!(cfg.feat_extract_norm, "layer");
+        assert!(cfg.conv_bias);
     }
 }

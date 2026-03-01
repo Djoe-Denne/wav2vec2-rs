@@ -153,3 +153,108 @@ pub trait WordGrouper: Send + Sync {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::types::TokenSequence;
+
+    use super::*;
+
+    #[test]
+    fn forward_output_host_metadata() {
+        let out = RuntimeInferenceOutput {
+            log_probs: vec![vec![0.0f32; 32]; 10],
+            num_frames_t: 10,
+            vocab_size: 32,
+            dtype: "f32".to_string(),
+        };
+        let host = ForwardOutput::Host(out);
+        let (t, v, dtype) = host.metadata();
+        assert_eq!(t, 10);
+        assert_eq!(v, 32);
+        assert_eq!(dtype, "f32");
+    }
+
+    #[test]
+    fn forward_output_host_into_runtime_inference_output() {
+        let out = RuntimeInferenceOutput {
+            log_probs: vec![vec![0.0f32; 8]; 5],
+            num_frames_t: 5,
+            vocab_size: 8,
+            dtype: "f32".to_string(),
+        };
+        let host = ForwardOutput::Host(out.clone());
+        let result = host.into_runtime_inference_output().unwrap();
+        assert_eq!(result.log_probs, out.log_probs);
+        assert_eq!(result.num_frames_t, out.num_frames_t);
+        assert_eq!(result.vocab_size, out.vocab_size);
+    }
+
+    struct DummyWordGrouper;
+
+    impl WordGrouper for DummyWordGrouper {
+        fn group_words(
+            &self,
+            _path: &[(usize, usize)],
+            _token_sequence: &TokenSequence,
+            _log_probs: &[Vec<f32>],
+            _blank_id: usize,
+            _word_sep_id: usize,
+            _stride_ms: f64,
+        ) -> Vec<WordTiming> {
+            vec![]
+        }
+    }
+
+    #[test]
+    fn word_grouper_default_group_words_profiled() {
+        let grouper = DummyWordGrouper;
+        let path: Vec<(usize, usize)> = vec![];
+        let token_sequence = TokenSequence {
+            tokens: vec![],
+            chars: vec![],
+            normalized_words: vec![],
+        };
+        let log_probs: Vec<Vec<f32>> = vec![];
+        let profiled = grouper.group_words_profiled(&path, &token_sequence, &log_probs, 0, 0, 20.0);
+        assert!(profiled.words.is_empty());
+        assert_eq!(profiled.conf_ms, 0.0);
+        assert_eq!(profiled.collect_ms, 0.0);
+        assert_eq!(profiled.expand_select_ms, 0.0);
+    }
+
+    struct MockRuntimeBackend;
+
+    impl RuntimeBackend for MockRuntimeBackend {
+        fn infer(&self, _normalized_audio: &[f32]) -> Result<ForwardOutput, AlignmentError> {
+            Ok(ForwardOutput::Host(RuntimeInferenceOutput {
+                log_probs: vec![vec![0.0f32; 4]; 2],
+                num_frames_t: 2,
+                vocab_size: 4,
+                dtype: "f32".to_string(),
+            }))
+        }
+
+        fn device_label(&self) -> String {
+            "mock".to_string()
+        }
+    }
+
+    #[test]
+    fn runtime_backend_default_infer_profiled() {
+        let backend = MockRuntimeBackend;
+        let result = backend.infer_profiled(&[0.0f32; 100]).unwrap();
+        assert_eq!(result.forward_ms, 0.0);
+        assert_eq!(result.post_ms, 0.0);
+        let (t, v, _) = result.forward_output.metadata();
+        assert_eq!(t, 2);
+        assert_eq!(v, 4);
+    }
+
+    #[test]
+    fn runtime_backend_default_synchronize() {
+        let backend = MockRuntimeBackend;
+        let result = backend.synchronize("test");
+        assert!(result.is_ok());
+    }
+}

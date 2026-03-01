@@ -334,3 +334,90 @@ fn expand_aggressive_tail_large_gap_frame_bounds() {
     assert_eq!(result[1].start_frame, 32); // 36 - 4
     assert_eq!(result[1].end_frame, 41);
 }
+
+#[test]
+fn group_into_words_profiled_returns_empty_when_path_yields_no_raw_words() {
+    // Path only blank frames: no word or sep emitted, so collect produces no raw words.
+    let path = vec![(0, 0), (0, 1), (0, 2)];
+    let tokens = vec![0];
+    let chars: Vec<Option<char>> = vec![None];
+    let expected_words: Vec<String> = vec![];
+    let log_probs = make_uniform_log_probs(4, 2);
+    let blank_id = 0;
+    let word_sep_id = 1;
+
+    let out = super::group_into_words_profiled(
+        &path,
+        &tokens,
+        &chars,
+        &expected_words,
+        &log_probs,
+        blank_id,
+        word_sep_id,
+        20.0,
+    );
+    assert!(out.words.is_empty());
+    assert_eq!(out.expand_select_ms, 0.0);
+}
+
+#[test]
+fn select_best_empty_raw_scores_as_invalid() {
+    let raw: Vec<RawWord> = vec![];
+    let candidate = vec![make_raw("A", 10, 20)];
+    let candidates = vec![(ExpansionPolicy::Balanced, candidate)];
+    let log_probs = make_uniform_log_probs(30, 4);
+    let selected = select_best(&raw, candidates, &log_probs, 0);
+    assert!(selected.is_some());
+    let s = selected.unwrap();
+    assert!(s.score.total_score < -1_000_000.0);
+}
+
+#[test]
+fn select_best_length_mismatch_scores_as_invalid() {
+    let raw = vec![make_raw("A", 10, 20), make_raw("B", 25, 35)];
+    let candidate_wrong_len = vec![make_raw("A", 10, 20)];
+    let candidates = vec![(ExpansionPolicy::Balanced, candidate_wrong_len)];
+    let log_probs = make_uniform_log_probs(50, 4);
+    let selected = select_best(&raw, candidates, &log_probs, 0);
+    assert!(selected.is_some());
+    let s = selected.unwrap();
+    assert!(s.score.total_score < -1_000_000.0);
+}
+
+#[test]
+fn group_into_words_profiled_with_full_confidence_stats() {
+    let tokens = vec![0, 1, 0, 2, 0, 3, 0];
+    let chars: Vec<Option<char>> = vec![None, Some('A'), None, Some('|'), None, Some('B'), None];
+    let path = vec![
+        (0, 0),
+        (0, 1),
+        (1, 2),
+        (1, 3),
+        (0, 4),
+        (3, 5),
+        (3, 6),
+        (0, 7),
+        (5, 8),
+        (5, 9),
+    ];
+    let num_frames = 10;
+    let vocab_size = 4;
+    let log_probs: Vec<Vec<f32>> = (0..num_frames).map(|_| vec![-1.0; vocab_size]).collect();
+    let out = super::group_into_words_profiled(
+        &path,
+        &tokens,
+        &chars,
+        &["A".to_string(), "B".to_string()],
+        &log_probs,
+        0,
+        2,
+        20.0,
+    );
+    assert_eq!(out.words.len(), 2);
+    assert!(out.words[0].confidence.is_some());
+    assert!(out.words[0].confidence_stats.quality_confidence.is_some());
+    assert!(out.words[0]
+        .confidence_stats
+        .calibrated_confidence
+        .is_some());
+}

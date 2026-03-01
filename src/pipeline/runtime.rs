@@ -547,3 +547,228 @@ fn dispatch_viterbi(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use crate::pipeline::defaults::{
+        CaseAwareTokenizer, DefaultWordGrouper, ViterbiSequenceAligner,
+    };
+    use crate::pipeline::traits::{ForwardOutput, RuntimeBackend, RuntimeInferenceOutput};
+
+    use super::*;
+
+    struct MockBackend {
+        output: RuntimeInferenceOutput,
+    }
+
+    impl MockBackend {
+        fn new(num_frames_t: usize, vocab_size: usize) -> Self {
+            Self {
+                output: RuntimeInferenceOutput {
+                    log_probs: vec![vec![0.0f32; vocab_size]; num_frames_t],
+                    num_frames_t,
+                    vocab_size,
+                    dtype: "f32".to_string(),
+                },
+            }
+        }
+    }
+
+    impl RuntimeBackend for MockBackend {
+        fn infer(&self, _normalized_audio: &[f32]) -> Result<ForwardOutput, AlignmentError> {
+            Ok(ForwardOutput::Host(RuntimeInferenceOutput {
+                log_probs: self.output.log_probs.clone(),
+                num_frames_t: self.output.num_frames_t,
+                vocab_size: self.output.vocab_size,
+                dtype: self.output.dtype.clone(),
+            }))
+        }
+
+        fn device_label(&self) -> String {
+            "mock".to_string()
+        }
+    }
+
+    fn make_aligner(
+        backend: Box<dyn RuntimeBackend>,
+        vocab: HashMap<char, usize>,
+        blank_id: usize,
+        word_sep_id: usize,
+        frame_stride_ms: f64,
+        expected_sample_rate_hz: u32,
+    ) -> ForcedAligner {
+        ForcedAligner::from_parts(ForcedAlignerParts {
+            runtime_backend: backend,
+            vocab,
+            blank_id,
+            word_sep_id,
+            frame_stride_ms,
+            expected_sample_rate_hz,
+            tokenizer: Box::new(CaseAwareTokenizer),
+            sequence_aligner: Box::new(ViterbiSequenceAligner),
+            word_grouper: Box::new(DefaultWordGrouper),
+        })
+    }
+
+    #[test]
+    fn align_empty_samples_returns_empty() {
+        let mut vocab = HashMap::new();
+        vocab.insert('h', 1);
+        vocab.insert('i', 2);
+        vocab.insert('|', 3);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 3, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![],
+            transcript: "hi".to_string(),
+            normalized: None,
+        };
+        let out = aligner.align(&input).unwrap();
+        assert!(out.words.is_empty());
+    }
+
+    #[test]
+    fn align_empty_transcript_returns_empty() {
+        let mut vocab = HashMap::new();
+        vocab.insert('h', 1);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 1, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![0.0f32; 1600],
+            transcript: "   ".to_string(),
+            normalized: None,
+        };
+        let out = aligner.align(&input).unwrap();
+        assert!(out.words.is_empty());
+    }
+
+    #[test]
+    fn align_sample_rate_mismatch_still_returns_ok() {
+        let mut vocab = HashMap::new();
+        vocab.insert('a', 1);
+        vocab.insert('|', 2);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 2, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 8_000,
+            samples: vec![0.0f32; 800],
+            transcript: "a".to_string(),
+            normalized: Some(vec![0.0f32; 800]),
+        };
+        let out = aligner.align(&input).unwrap();
+        assert!(out.words.len() <= 1);
+    }
+
+    #[test]
+    fn align_uses_normalized_when_provided() {
+        let mut vocab = HashMap::new();
+        vocab.insert('a', 1);
+        vocab.insert('|', 2);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 2, 20.0, 16_000);
+        let normalized = vec![0.0f32; 1600];
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![1.0f32; 1600],
+            transcript: "a".to_string(),
+            normalized: Some(normalized.clone()),
+        };
+        let out = aligner.align(&input).unwrap();
+        assert!(out.words.len() <= 1);
+    }
+
+    #[test]
+    fn align_inner_empty_tokens_returns_empty() {
+        let mut vocab = HashMap::new();
+        vocab.insert('x', 1);
+        vocab.insert('|', 2);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 2, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![0.0f32; 1600],
+            transcript: "hello".to_string(),
+            normalized: Some(vec![0.0f32; 1600]),
+        };
+        let out = aligner.align(&input).unwrap();
+        assert!(out.words.is_empty());
+    }
+
+    #[test]
+    fn align_success_returns_words() {
+        let mut vocab = HashMap::new();
+        vocab.insert('a', 1);
+        vocab.insert('|', 2);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 2, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![0.0f32; 1600],
+            transcript: "a".to_string(),
+            normalized: Some(vec![0.0f32; 1600]),
+        };
+        let out = aligner.align(&input).unwrap();
+        assert!(out.words.len() <= 1);
+    }
+
+    #[test]
+    fn align_profiled_empty_input_returns_empty() {
+        let mut vocab = HashMap::new();
+        vocab.insert('a', 1);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 1, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![],
+            transcript: String::new(),
+            normalized: None,
+        };
+        let out = aligner.align_profiled(&input).unwrap();
+        assert!(out.output.words.is_empty());
+        assert_eq!(out.timings.total_ms, 0.0);
+    }
+
+    #[test]
+    fn align_profiled_success_returns_words() {
+        let mut vocab = HashMap::new();
+        vocab.insert('a', 1);
+        vocab.insert('|', 2);
+        let backend = MockBackend::new(10, 4);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 2, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![0.0f32; 1600],
+            transcript: "a".to_string(),
+            normalized: Some(vec![0.0f32; 1600]),
+        };
+        let out = aligner.align_profiled(&input).unwrap();
+        assert!(out.output.words.len() <= 1);
+        assert!(out.timings.forward_ms >= 0.0);
+        assert_eq!(out.num_frames_t, 10);
+    }
+
+    #[test]
+    fn align_inner_audio_too_short_returns_err() {
+        let mut vocab = HashMap::new();
+        vocab.insert('a', 1);
+        vocab.insert('b', 2);
+        vocab.insert('c', 3);
+        vocab.insert('d', 4);
+        vocab.insert('e', 5);
+        vocab.insert('|', 6);
+        let backend = MockBackend::new(2, 8);
+        let aligner = make_aligner(Box::new(backend), vocab, 0, 6, 20.0, 16_000);
+        let input = AlignmentInput {
+            sample_rate_hz: 16_000,
+            samples: vec![0.0f32; 320],
+            transcript: "abcde".to_string(),
+            normalized: Some(vec![0.0f32; 320]),
+        };
+        let err = aligner.align(&input).unwrap_err();
+        assert!(err.to_string().contains("too short") || err.to_string().contains("frames"));
+    }
+}
