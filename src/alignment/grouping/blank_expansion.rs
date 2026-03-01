@@ -116,3 +116,109 @@ pub(super) fn expand_with_policy(
 
     words
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{expand, expand_with_policy, ExpansionPolicy};
+    use crate::alignment::grouping::RawWord;
+    use crate::types::WordConfidenceStats;
+
+    fn make_raw(word: &str, start: usize, end: usize) -> RawWord {
+        RawWord {
+            word: word.to_string(),
+            start_frame: start,
+            end_frame: end,
+            confidence: Some(1.0),
+            confidence_stats: WordConfidenceStats {
+                geo_mean_prob: Some(1.0),
+                ..WordConfidenceStats::default()
+            },
+        }
+    }
+
+    #[test]
+    fn expansion_policy_as_str() {
+        assert_eq!(ExpansionPolicy::Balanced.as_str(), "balanced");
+        assert_eq!(
+            ExpansionPolicy::ConservativeStart.as_str(),
+            "conservative_start"
+        );
+        assert_eq!(ExpansionPolicy::AggressiveTail.as_str(), "aggressive_tail");
+    }
+
+    #[test]
+    fn expansion_policy_all_has_three_variants() {
+        assert_eq!(ExpansionPolicy::ALL.len(), 3);
+        assert!(ExpansionPolicy::ALL.iter().all(|p| match p {
+            ExpansionPolicy::Balanced
+            | ExpansionPolicy::ConservativeStart
+            | ExpansionPolicy::AggressiveTail => true,
+        }));
+    }
+
+    #[test]
+    fn expand_empty_returns_empty() {
+        let result = expand(Vec::new(), 0, 100);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn expand_with_policy_empty_returns_empty() {
+        let result = expand_with_policy(Vec::new(), 0, 100, ExpansionPolicy::Balanced);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn expand_with_policy_adjacent_words_no_gap_unchanged() {
+        let words = vec![make_raw("A", 5, 10), make_raw("B", 11, 15)];
+        for policy in ExpansionPolicy::ALL {
+            let result = expand_with_policy(words.clone(), 0, 20, policy);
+            assert_eq!(result[0].start_frame, 5);
+            assert_eq!(result[0].end_frame, 10);
+            assert_eq!(result[1].start_frame, 11);
+            assert_eq!(result[1].end_frame, 15);
+        }
+    }
+
+    #[test]
+    fn expand_with_policy_gap_one_unchanged() {
+        // gap = 1: min_silence = min(4, 1) = 1, absorb_budget = 0
+        let words = vec![make_raw("A", 5, 10), make_raw("B", 12, 17)];
+        let result = expand_with_policy(words, 0, 20, ExpansionPolicy::Balanced);
+        assert_eq!(result[0].end_frame, 10);
+        assert_eq!(result[1].start_frame, 12);
+    }
+
+    #[test]
+    fn expand_with_policy_balanced_two_words_splits_gap() {
+        let words = vec![make_raw("A", 10, 20), make_raw("B", 30, 40)];
+        let result = expand_with_policy(words, 0, 50, ExpansionPolicy::Balanced);
+        assert_eq!(result[0].end_frame, 25);
+        assert_eq!(result[1].start_frame, 30);
+    }
+
+    #[test]
+    fn expand_with_policy_conservative_start_caps_left_more_than_right() {
+        let words = vec![make_raw("A", 5, 10), make_raw("B", 36, 41)];
+        let result = expand_with_policy(words, 0, 50, ExpansionPolicy::ConservativeStart);
+        assert_eq!(result[0].end_frame, 20);
+        assert_eq!(result[1].start_frame, 34);
+    }
+
+    #[test]
+    fn expand_with_policy_aggressive_tail_takes_more_left() {
+        let words = vec![make_raw("A", 5, 10), make_raw("B", 36, 41)];
+        let result = expand_with_policy(words, 0, 50, ExpansionPolicy::AggressiveTail);
+        assert_eq!(result[0].end_frame, 26);
+        assert_eq!(result[1].start_frame, 32);
+    }
+
+    #[test]
+    fn expand_single_word_unchanged() {
+        let words = vec![make_raw("X", 10, 20)];
+        let result = expand_with_policy(words, 0, 30, ExpansionPolicy::Balanced);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].start_frame, 10);
+        assert_eq!(result[0].end_frame, 20);
+    }
+}
