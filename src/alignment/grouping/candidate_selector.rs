@@ -146,6 +146,43 @@ struct BoundaryEvidence {
     per_word_blank_prob: Vec<Option<f32>>,
 }
 
+struct BlankEvidenceAccumulator<'a> {
+    blank_sum: &'a mut f64,
+    count: &'a mut usize,
+    per_word_sum: &'a mut [f64],
+    per_word_count: &'a mut [usize],
+}
+
+fn accumulate_blank_evidence_for_pair(
+    log_probs: &[Vec<f32>],
+    blank_id: usize,
+    raw: &RawWord,
+    cand: &RawWord,
+    idx: usize,
+    acc: &mut BlankEvidenceAccumulator<'_>,
+) {
+    if cand.start_frame < raw.start_frame {
+        for frame in cand.start_frame..raw.start_frame {
+            if let Some(blank_prob) = blank_prob_at_frame(log_probs, frame, blank_id) {
+                *acc.blank_sum += blank_prob;
+                *acc.count += 1;
+                acc.per_word_sum[idx] += blank_prob;
+                acc.per_word_count[idx] += 1;
+            }
+        }
+    }
+    if cand.end_frame > raw.end_frame {
+        for frame in (raw.end_frame + 1)..=cand.end_frame {
+            if let Some(blank_prob) = blank_prob_at_frame(log_probs, frame, blank_id) {
+                *acc.blank_sum += blank_prob;
+                *acc.count += 1;
+                acc.per_word_sum[idx] += blank_prob;
+                acc.per_word_count[idx] += 1;
+            }
+        }
+    }
+}
+
 fn compute_boundary_evidence(
     raw_words: &[RawWord],
     candidate_words: &[RawWord],
@@ -158,31 +195,17 @@ fn compute_boundary_evidence(
 
     let mut blank_sum = 0.0f64;
     let mut count = 0usize;
-
     let mut per_word_sum = vec![0.0f64; candidate_words.len()];
     let mut per_word_count = vec![0usize; candidate_words.len()];
 
+    let mut acc = BlankEvidenceAccumulator {
+        blank_sum: &mut blank_sum,
+        count: &mut count,
+        per_word_sum: &mut per_word_sum,
+        per_word_count: &mut per_word_count,
+    };
     for (idx, (raw, cand)) in raw_words.iter().zip(candidate_words.iter()).enumerate() {
-        if cand.start_frame < raw.start_frame {
-            for frame in cand.start_frame..raw.start_frame {
-                if let Some(blank_prob) = blank_prob_at_frame(log_probs, frame, blank_id) {
-                    blank_sum += blank_prob;
-                    count += 1;
-                    per_word_sum[idx] += blank_prob;
-                    per_word_count[idx] += 1;
-                }
-            }
-        }
-        if cand.end_frame > raw.end_frame {
-            for frame in (raw.end_frame + 1)..=cand.end_frame {
-                if let Some(blank_prob) = blank_prob_at_frame(log_probs, frame, blank_id) {
-                    blank_sum += blank_prob;
-                    count += 1;
-                    per_word_sum[idx] += blank_prob;
-                    per_word_count[idx] += 1;
-                }
-            }
-        }
+        accumulate_blank_evidence_for_pair(log_probs, blank_id, raw, cand, idx, &mut acc);
     }
 
     let per_word_blank_prob = per_word_sum

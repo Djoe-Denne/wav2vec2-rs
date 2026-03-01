@@ -698,6 +698,51 @@ fn compute_structural_metrics(
     })
 }
 
+struct ConfidenceValues {
+    conf_values: Vec<f64>,
+    margin_values: Vec<f64>,
+    boundary_values: Vec<f64>,
+    low_conf_count: usize,
+    low_conf_threshold: f64,
+}
+
+fn collect_confidence_values(predicted: &[WordTiming]) -> ConfidenceValues {
+    let low_conf_threshold = tuned_low_conf_threshold(predicted);
+    let mut conf_values = Vec::new();
+    let mut margin_values = Vec::new();
+    let mut boundary_values = Vec::new();
+    let mut low_conf = 0usize;
+
+    for word in predicted {
+        if let Some(conf) = word.confidence {
+            conf_values.push(conf as f64);
+        }
+        if let Some(margin) = word.confidence_stats.mean_margin {
+            margin_values.push(margin as f64);
+        }
+        if let Some(boundary) = word.confidence_stats.boundary_confidence {
+            boundary_values.push(boundary as f64);
+        }
+        let is_invalid_conf =
+            word.confidence.is_none() || word.confidence_stats.coverage_frame_count == 0;
+        let is_low_conf = is_invalid_conf
+            || word
+                .confidence
+                .is_some_and(|value| (value as f64) < low_conf_threshold);
+        if is_low_conf {
+            low_conf += 1;
+        }
+    }
+
+    ConfidenceValues {
+        conf_values,
+        margin_values,
+        boundary_values,
+        low_conf_count: low_conf,
+        low_conf_threshold,
+    }
+}
+
 fn compute_confidence_metrics(
     predicted: &[WordTiming],
 ) -> Result<ConfidenceMetrics, AlignmentError> {
@@ -714,43 +759,15 @@ fn compute_confidence_metrics(
         });
     }
 
-    let mut conf_values = Vec::new();
-    let mut margin_values = Vec::new();
-    let mut boundary_values = Vec::new();
-    let mut low_conf = 0usize;
-    let low_conf_threshold = tuned_low_conf_threshold(predicted);
-
-    for word in predicted {
-        let confidence_score = word.confidence;
-        let mean_margin = word.confidence_stats.mean_margin;
-        let boundary_conf = word.confidence_stats.boundary_confidence;
-
-        if let Some(conf) = confidence_score {
-            conf_values.push(conf as f64);
-        }
-        if let Some(margin) = mean_margin {
-            margin_values.push(margin as f64);
-        }
-        if let Some(boundary) = boundary_conf {
-            boundary_values.push(boundary as f64);
-        }
-
-        let is_invalid_conf =
-            confidence_score.is_none() || word.confidence_stats.coverage_frame_count == 0;
-        let is_low_conf = is_invalid_conf
-            || confidence_score.is_some_and(|value| (value as f64) < low_conf_threshold);
-        if is_low_conf {
-            low_conf += 1;
-        }
-    }
-
+    let values = collect_confidence_values(predicted);
     let count = predicted.len() as f64;
-    let mean_conf = if conf_values.is_empty() {
+    let mean_conf = if values.conf_values.is_empty() {
         0.0
     } else {
-        mean(&conf_values)
+        mean(&values.conf_values)
     };
-    let min_conf = conf_values
+    let min_conf = values
+        .conf_values
         .iter()
         .copied()
         .fold(f64::INFINITY, |cur, value| cur.min(value));
@@ -760,27 +777,27 @@ fn compute_confidence_metrics(
         word_conf_mean: checked_f32(mean_conf, "confidence.word_conf_mean")?,
         word_conf_min: checked_f32(min_conf, "confidence.word_conf_min")?,
         low_conf_threshold_used: checked_f32(
-            low_conf_threshold,
+            values.low_conf_threshold,
             "confidence.low_conf_threshold_used",
         )?,
-        avg_word_margin: if margin_values.is_empty() {
+        avg_word_margin: if values.margin_values.is_empty() {
             None
         } else {
             Some(checked_f32(
-                mean(&margin_values),
+                mean(&values.margin_values),
                 "confidence.avg_word_margin",
             )?)
         },
-        avg_boundary_confidence: if boundary_values.is_empty() {
+        avg_boundary_confidence: if values.boundary_values.is_empty() {
             None
         } else {
             Some(checked_f32(
-                mean(&boundary_values),
+                mean(&values.boundary_values),
                 "confidence.avg_boundary_confidence",
             )?)
         },
         low_conf_word_ratio: checked_f32(
-            low_conf as f64 / count,
+            values.low_conf_count as f64 / count,
             "confidence.low_conf_word_ratio",
         )?,
         blank_frame_ratio: None,

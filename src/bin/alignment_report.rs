@@ -225,6 +225,264 @@ fn main() {
     }
 }
 
+/// Run alignment for one case (non-profiled path).
+fn align_case_simple(
+    aligner: &ForcedAligner,
+    alignment_input: &AlignmentInput,
+    case_id: &str,
+    lib_work_elapsed: &mut Duration,
+) -> Result<Vec<WordTiming>, String> {
+    let lib_started = Instant::now();
+    let output = aligner
+        .align(alignment_input)
+        .map_err(|err| format!("{}: align() failed: {err}", case_id))?;
+    *lib_work_elapsed += lib_started.elapsed();
+    Ok(output.words)
+}
+
+#[cfg(feature = "alignment-profiling")]
+struct PerfRunAccumulator<'a> {
+    warmup_done: &'a mut bool,
+    lib_work_elapsed: &'a mut Duration,
+    perf_forward_samples: &'a mut Vec<f64>,
+    perf_post_samples: &'a mut Vec<f64>,
+    perf_dp_samples: &'a mut Vec<f64>,
+    perf_group_samples: &'a mut Vec<f64>,
+    perf_conf_samples: &'a mut Vec<f64>,
+    perf_align_samples: &'a mut Vec<f64>,
+    perf_align_per_ts_samples: &'a mut Vec<f64>,
+    perf_align_per_t_samples: &'a mut Vec<f64>,
+    perf_total_samples: &'a mut Vec<f64>,
+    perf_forward_gpu_used_samples: &'a mut Vec<f64>,
+    perf_dp_gpu_used_samples: &'a mut Vec<f64>,
+    perf_gpu_total: &'a mut Option<u64>,
+    scaling_samples: &'a mut Vec<ScalingSample>,
+    perf_jsonl_appender: &'a mut Option<perf_report_formatter::PerfJsonlAppender>,
+    perf_records: &'a mut Vec<perf_report_formatter::PerfUtteranceRecord>,
+}
+
+#[cfg(feature = "alignment-profiling")]
+fn align_case_profiled(
+    case: &Case,
+    aligner: &ForcedAligner,
+    alignment_input: &AlignmentInput,
+    duration_ms: u64,
+    frame_stride_ms: f64,
+    args: &Args,
+    acc: &mut PerfRunAccumulator<'_>,
+) -> Result<Vec<WordTiming>, String> {
+    if !*acc.warmup_done {
+        for _ in 0..args.perf_warmup {
+            aligner
+                .align_profiled(alignment_input)
+                .map_err(|err| format!("{}: warm-up align() failed: {err}", case.id))?;
+        }
+        *acc.warmup_done = true;
+    }
+
+    let mut forward_ms_repeats = Vec::with_capacity(args.perf_repeats);
+    let mut post_ms_repeats = Vec::with_capacity(args.perf_repeats);
+    let mut dp_ms_repeats = Vec::with_capacity(args.perf_repeats);
+    let mut group_ms_repeats = Vec::with_capacity(args.perf_repeats);
+    let mut conf_ms_repeats = Vec::with_capacity(args.perf_repeats);
+    let mut align_ms_repeats = Vec::with_capacity(args.perf_repeats);
+    let mut total_ms_repeats = Vec::with_capacity(args.perf_repeats);
+    let mut selected_words: Option<Vec<WordTiming>> = None;
+    let mut selected_num_frames_t = 0usize;
+    let mut selected_state_len = 0usize;
+    let mut selected_ts_product = 0u64;
+    let mut selected_vocab_size = 0usize;
+    let mut selected_dtype = String::new();
+    let mut selected_device = String::new();
+    let mut process_memory: Option<StageMemoryMap> = None;
+    let gpu_reader = if args.device.eq_ignore_ascii_case("cpu") {
+        None
+    } else {
+        wav2vec2_rs::pipeline::memory_tracker::cuda_gpu_reader()
+    };
+    let mut tracker = MemoryTracker::new(gpu_reader);
+
+    for repeat_idx in 0..args.perf_repeats {
+        let profiled = if repeat_idx == 0 {
+            let (prof, mem) = aligner
+                .align_profiled_with_memory(alignment_input, &mut tracker)
+                .map_err(|err| format!("{}: perf align_with_memory() failed: {err}", case.id))?;
+            process_memory = Some(mem);
+            prof
+        } else {
+            aligner
+                .align_profiled(alignment_input)
+                .map_err(|err| format!("{}: perf align() failed: {err}", case.id))?
+        };
+        let timings = profiled.timings;
+        forward_ms_repeats.push(timings.forward_ms);
+        post_ms_repeats.push(timings.post_ms);
+        dp_ms_repeats.push(timings.dp_ms);
+        group_ms_repeats.push(timings.group_ms);
+        conf_ms_repeats.push(timings.conf_ms);
+        align_ms_repeats.push(timings.align_ms);
+        total_ms_repeats.push(timings.total_ms);
+        if repeat_idx == 0 {
+            selected_words = Some(profiled.output.words);
+            selected_num_frames_t = profiled.num_frames_t;
+            selected_state_len = profiled.state_len;
+            selected_ts_product = profiled.ts_product;
+            selected_vocab_size = profiled.vocab_size;
+            selected_dtype = profiled.dtype;
+            selected_device = profiled.device;
+        }
+    }
+
+    let forward_ms = aggregate_measurements(&forward_ms_repeats, args.perf_aggregate);
+    let post_ms = aggregate_measurements(&post_ms_repeats, args.perf_aggregate);
+    let dp_ms = aggregate_measurements(&dp_ms_repeats, args.perf_aggregate);
+    let group_ms = aggregate_measurements(&group_ms_repeats, args.perf_aggregate);
+    let conf_ms = aggregate_measurements(&conf_ms_repeats, args.perf_aggregate);
+    let align_ms = dp_ms + group_ms + conf_ms;
+    let total_ms = aggregate_measurements(&total_ms_repeats, args.perf_aggregate);
+    let align_ms_per_ts = if selected_ts_product > 0 {
+        align_ms / selected_ts_product as f64
+    } else {
+        0.0
+    };
+    let align_ms_per_t = if selected_num_frames_t > 0 {
+        align_ms / selected_num_frames_t as f64
+    } else {
+        0.0
+    };
+
+    let record = perf_report_formatter::PerfUtteranceRecord {
+        utterance_id: case.id.clone(),
+        audio_path: case.audio_path.clone(),
+        duration_ms,
+        num_frames_t: selected_num_frames_t,
+        state_len: selected_state_len,
+        ts_product: selected_ts_product,
+        vocab_size: selected_vocab_size,
+        dtype: selected_dtype,
+        device: selected_device,
+        frame_stride_ms,
+        warmup: args.perf_warmup,
+        repeats: args.perf_repeats,
+        aggregate: args.perf_aggregate.as_str().to_string(),
+        forward_ms,
+        post_ms,
+        dp_ms,
+        group_ms,
+        conf_ms,
+        align_ms,
+        align_ms_per_ts,
+        align_ms_per_t,
+        total_ms,
+        forward_ms_repeats,
+        post_ms_repeats,
+        dp_ms_repeats,
+        group_ms_repeats,
+        conf_ms_repeats,
+        align_ms_repeats,
+        total_ms_repeats,
+        memory: process_memory
+            .as_ref()
+            .and_then(stage_memory_map_to_perf_memory),
+    };
+
+    acc.perf_forward_samples.push(record.forward_ms);
+    acc.perf_post_samples.push(record.post_ms);
+    acc.perf_dp_samples.push(record.dp_ms);
+    acc.perf_group_samples.push(record.group_ms);
+    acc.perf_conf_samples.push(record.conf_ms);
+    acc.perf_align_samples.push(record.align_ms);
+    acc.perf_align_per_ts_samples.push(record.align_ms_per_ts);
+    acc.perf_align_per_t_samples.push(record.align_ms_per_t);
+    acc.perf_total_samples.push(record.total_ms);
+    if let Some(ref mem) = record.memory {
+        if let Some(ref f) = mem.forward {
+            acc.perf_forward_gpu_used_samples.push(f.gpu_used as f64);
+            if acc.perf_gpu_total.is_none() {
+                *acc.perf_gpu_total = Some(f.gpu_total);
+            }
+        }
+        if let Some(ref d) = mem.dp {
+            acc.perf_dp_gpu_used_samples.push(d.gpu_used as f64);
+        }
+    }
+    acc.scaling_samples.push(ScalingSample {
+        utterance_id: record.utterance_id.clone(),
+        num_frames_t: record.num_frames_t,
+        state_len: record.state_len,
+        ts_product: record.ts_product,
+        dp_ms: record.dp_ms,
+        group_ms: record.group_ms,
+        conf_ms: record.conf_ms,
+    });
+    *acc.lib_work_elapsed += Duration::from_secs_f64(record.total_ms / 1000.0);
+
+    if args.perf_append {
+        let appender = acc
+            .perf_jsonl_appender
+            .as_mut()
+            .ok_or_else(|| "internal error: missing perf JSONL appender".to_string())?;
+        appender.append(&record)?;
+    } else {
+        acc.perf_records.push(record);
+    }
+
+    selected_words.ok_or_else(|| format!("{}: missing profiled output words", case.id))
+}
+
+struct CaseOutputContext<'a> {
+    case: &'a Case,
+    output_words: Vec<WordTiming>,
+    duration_ms: u64,
+    output_format: OutputFormat,
+    dataset_root: &'a Path,
+    args: &'a Args,
+}
+
+struct CaseOutputAccumulator<'a> {
+    sentence_reports: &'a mut Vec<SentenceReport>,
+    predicted_by_id: &'a mut HashMap<String, Vec<WordTiming>>,
+    references_by_id: &'a mut HashMap<String, Vec<ReferenceWord>>,
+    written_textgrids: &'a mut usize,
+}
+
+fn apply_case_output(
+    ctx: CaseOutputContext<'_>,
+    out: &mut CaseOutputAccumulator<'_>,
+) -> Result<(), String> {
+    match ctx.output_format {
+        OutputFormat::Json => {
+            let split = infer_split(&ctx.case.audio_path);
+            let sentence = compute_sentence_report(
+                &ctx.case.id,
+                split,
+                &ctx.output_words,
+                Some(&ctx.case.reference_words),
+                ctx.duration_ms,
+            )
+            .map_err(|err| format!("{}: metric computation failed: {err}", ctx.case.id))?;
+            out.predicted_by_id
+                .insert(ctx.case.id.clone(), ctx.output_words);
+            out.references_by_id
+                .insert(ctx.case.id.clone(), ctx.case.reference_words.clone());
+            out.sentence_reports.push(sentence);
+        }
+        OutputFormat::TextGrid => {
+            text_grid_report_formatter::write_textgrid(
+                ctx.dataset_root,
+                &ctx.case.audio_path,
+                &ctx.case.transcript,
+                &ctx.output_words,
+                ctx.duration_ms,
+                &ctx.args.textgrid_suffix,
+            )?;
+            *out.written_textgrids += 1;
+        }
+        OutputFormat::Perf => {}
+    }
+    Ok(())
+}
+
 fn run() -> Result<(), String> {
     let args = Args::parse();
     let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -396,172 +654,38 @@ fn run() -> Result<(), String> {
             transcript: case.transcript.clone(),
             normalized,
         };
+
         let output_words = if perf_enabled {
             #[cfg(feature = "alignment-profiling")]
             {
-                if !perf_warmup_done {
-                    for _ in 0..args.perf_warmup {
-                        aligner
-                            .align_profiled(&alignment_input)
-                            .map_err(|err| format!("{}: warm-up align() failed: {err}", case.id))?;
-                    }
-                    perf_warmup_done = true;
-                }
-
-                let mut forward_ms_repeats = Vec::with_capacity(args.perf_repeats);
-                let mut post_ms_repeats = Vec::with_capacity(args.perf_repeats);
-                let mut dp_ms_repeats = Vec::with_capacity(args.perf_repeats);
-                let mut group_ms_repeats = Vec::with_capacity(args.perf_repeats);
-                let mut conf_ms_repeats = Vec::with_capacity(args.perf_repeats);
-                let mut align_ms_repeats = Vec::with_capacity(args.perf_repeats);
-                let mut total_ms_repeats = Vec::with_capacity(args.perf_repeats);
-                let mut selected_words: Option<Vec<WordTiming>> = None;
-                let mut selected_num_frames_t = 0usize;
-                let mut selected_state_len = 0usize;
-                let mut selected_ts_product = 0u64;
-                let mut selected_vocab_size = 0usize;
-                let mut selected_dtype = String::new();
-                let mut selected_device = String::new();
-                let mut process_memory: Option<StageMemoryMap> = None;
-                // Use GPU memory probe for both cuda and generic-gpu (ORT CUDA EP loads libcudart).
-                let gpu_reader = if args.device.eq_ignore_ascii_case("cpu") {
-                    None
-                } else {
-                    wav2vec2_rs::pipeline::memory_tracker::cuda_gpu_reader()
+                let mut perf_acc = PerfRunAccumulator {
+                    warmup_done: &mut perf_warmup_done,
+                    lib_work_elapsed: &mut lib_work_elapsed,
+                    perf_forward_samples: &mut perf_forward_samples,
+                    perf_post_samples: &mut perf_post_samples,
+                    perf_dp_samples: &mut perf_dp_samples,
+                    perf_group_samples: &mut perf_group_samples,
+                    perf_conf_samples: &mut perf_conf_samples,
+                    perf_align_samples: &mut perf_align_samples,
+                    perf_align_per_ts_samples: &mut perf_align_per_ts_samples,
+                    perf_align_per_t_samples: &mut perf_align_per_t_samples,
+                    perf_total_samples: &mut perf_total_samples,
+                    perf_forward_gpu_used_samples: &mut perf_forward_gpu_used_samples,
+                    perf_dp_gpu_used_samples: &mut perf_dp_gpu_used_samples,
+                    perf_gpu_total: &mut perf_gpu_total,
+                    scaling_samples: &mut scaling_samples,
+                    perf_jsonl_appender: &mut perf_jsonl_appender,
+                    perf_records: &mut perf_records,
                 };
-                let mut tracker = MemoryTracker::new(gpu_reader);
-
-                for repeat_idx in 0..args.perf_repeats {
-                    let profiled = if repeat_idx == 0 {
-                        let (prof, mem) = aligner
-                            .align_profiled_with_memory(&alignment_input, &mut tracker)
-                            .map_err(|err| {
-                                format!("{}: perf align_with_memory() failed: {err}", case.id)
-                            })?;
-                        process_memory = Some(mem);
-                        prof
-                    } else {
-                        aligner
-                            .align_profiled(&alignment_input)
-                            .map_err(|err| format!("{}: perf align() failed: {err}", case.id))?
-                    };
-                    let timings = profiled.timings;
-                    forward_ms_repeats.push(timings.forward_ms);
-                    post_ms_repeats.push(timings.post_ms);
-                    dp_ms_repeats.push(timings.dp_ms);
-                    group_ms_repeats.push(timings.group_ms);
-                    conf_ms_repeats.push(timings.conf_ms);
-                    align_ms_repeats.push(timings.align_ms);
-                    total_ms_repeats.push(timings.total_ms);
-
-                    if repeat_idx == 0 {
-                        selected_words = Some(profiled.output.words);
-                        selected_num_frames_t = profiled.num_frames_t;
-                        selected_state_len = profiled.state_len;
-                        selected_ts_product = profiled.ts_product;
-                        selected_vocab_size = profiled.vocab_size;
-                        selected_dtype = profiled.dtype;
-                        selected_device = profiled.device;
-                    }
-                }
-
-                let forward_ms = aggregate_measurements(&forward_ms_repeats, args.perf_aggregate);
-                let post_ms = aggregate_measurements(&post_ms_repeats, args.perf_aggregate);
-                let dp_ms = aggregate_measurements(&dp_ms_repeats, args.perf_aggregate);
-                let group_ms = aggregate_measurements(&group_ms_repeats, args.perf_aggregate);
-                let conf_ms = aggregate_measurements(&conf_ms_repeats, args.perf_aggregate);
-                // Keep record-level substage timings internally consistent even when
-                // the selected aggregate is median (median(a+b) != median(a)+median(b)).
-                let align_ms = dp_ms + group_ms + conf_ms;
-                let total_ms = aggregate_measurements(&total_ms_repeats, args.perf_aggregate);
-                let align_ms_per_ts = if selected_ts_product > 0 {
-                    align_ms / selected_ts_product as f64
-                } else {
-                    0.0
-                };
-                let align_ms_per_t = if selected_num_frames_t > 0 {
-                    align_ms / selected_num_frames_t as f64
-                } else {
-                    0.0
-                };
-
-                let record = perf_report_formatter::PerfUtteranceRecord {
-                    utterance_id: case.id.clone(),
-                    audio_path: case.audio_path.clone(),
+                align_case_profiled(
+                    case,
+                    &aligner,
+                    &alignment_input,
                     duration_ms,
-                    num_frames_t: selected_num_frames_t,
-                    state_len: selected_state_len,
-                    ts_product: selected_ts_product,
-                    vocab_size: selected_vocab_size,
-                    dtype: selected_dtype,
-                    device: selected_device,
                     frame_stride_ms,
-                    warmup: args.perf_warmup,
-                    repeats: args.perf_repeats,
-                    aggregate: args.perf_aggregate.as_str().to_string(),
-                    forward_ms,
-                    post_ms,
-                    dp_ms,
-                    group_ms,
-                    conf_ms,
-                    align_ms,
-                    align_ms_per_ts,
-                    align_ms_per_t,
-                    total_ms,
-                    forward_ms_repeats,
-                    post_ms_repeats,
-                    dp_ms_repeats,
-                    group_ms_repeats,
-                    conf_ms_repeats,
-                    align_ms_repeats,
-                    total_ms_repeats,
-                    memory: process_memory
-                        .as_ref()
-                        .and_then(stage_memory_map_to_perf_memory),
-                };
-
-                perf_forward_samples.push(record.forward_ms);
-                perf_post_samples.push(record.post_ms);
-                perf_dp_samples.push(record.dp_ms);
-                perf_group_samples.push(record.group_ms);
-                perf_conf_samples.push(record.conf_ms);
-                perf_align_samples.push(record.align_ms);
-                perf_align_per_ts_samples.push(record.align_ms_per_ts);
-                perf_align_per_t_samples.push(record.align_ms_per_t);
-                perf_total_samples.push(record.total_ms);
-                if let Some(ref mem) = record.memory {
-                    if let Some(ref f) = mem.forward {
-                        perf_forward_gpu_used_samples.push(f.gpu_used as f64);
-                        if perf_gpu_total.is_none() {
-                            perf_gpu_total = Some(f.gpu_total);
-                        }
-                    }
-                    if let Some(ref d) = mem.dp {
-                        perf_dp_gpu_used_samples.push(d.gpu_used as f64);
-                    }
-                }
-                scaling_samples.push(ScalingSample {
-                    utterance_id: record.utterance_id.clone(),
-                    num_frames_t: record.num_frames_t,
-                    state_len: record.state_len,
-                    ts_product: record.ts_product,
-                    dp_ms: record.dp_ms,
-                    group_ms: record.group_ms,
-                    conf_ms: record.conf_ms,
-                });
-                lib_work_elapsed += Duration::from_secs_f64(record.total_ms / 1000.0);
-
-                if args.perf_append {
-                    let appender = perf_jsonl_appender
-                        .as_mut()
-                        .ok_or_else(|| "internal error: missing perf JSONL appender".to_string())?;
-                    appender.append(&record)?;
-                } else {
-                    perf_records.push(record);
-                }
-
-                selected_words
-                    .ok_or_else(|| format!("{}: missing profiled output words", case.id))?
+                    &args,
+                    &mut perf_acc,
+                )?
             }
             #[cfg(not(feature = "alignment-profiling"))]
             {
@@ -570,43 +694,25 @@ fn run() -> Result<(), String> {
                 )
             }
         } else {
-            let lib_started = Instant::now();
-            let output = aligner
-                .align(&alignment_input)
-                .map_err(|err| format!("{}: align() failed: {err}", case.id))?;
-            lib_work_elapsed += lib_started.elapsed();
-            output.words
+            align_case_simple(&aligner, &alignment_input, &case.id, &mut lib_work_elapsed)?
         };
 
-        match args.output_format {
-            OutputFormat::Json => {
-                let split = infer_split(&case.audio_path);
-                let sentence = compute_sentence_report(
-                    &case.id,
-                    split,
-                    &output_words,
-                    Some(&case.reference_words),
-                    duration_ms,
-                )
-                .map_err(|err| format!("{}: metric computation failed: {err}", case.id))?;
-
-                predicted_by_id.insert(case.id.clone(), output_words);
-                references_by_id.insert(case.id.clone(), case.reference_words.clone());
-                sentence_reports.push(sentence);
-            }
-            OutputFormat::TextGrid => {
-                text_grid_report_formatter::write_textgrid(
-                    &dataset_root,
-                    &case.audio_path,
-                    &case.transcript,
-                    &output_words,
-                    duration_ms,
-                    &args.textgrid_suffix,
-                )?;
-                written_textgrids += 1;
-            }
-            OutputFormat::Perf => {}
-        }
+        apply_case_output(
+            CaseOutputContext {
+                case,
+                output_words,
+                duration_ms,
+                output_format: args.output_format,
+                dataset_root: &dataset_root,
+                args: &args,
+            },
+            &mut CaseOutputAccumulator {
+                sentence_reports: &mut sentence_reports,
+                predicted_by_id: &mut predicted_by_id,
+                references_by_id: &mut references_by_id,
+                written_textgrids: &mut written_textgrids,
+            },
+        )?;
         progress.inc(1);
     }
     progress.finish_with_message("alignment pass complete");
@@ -1021,83 +1127,102 @@ fn parse_words_with_textgrid_crate(path: &Path) -> Result<Vec<ReferenceWord>, St
     Ok(words)
 }
 
-fn parse_words_tier_fallback(path: &Path) -> Result<Vec<ReferenceWord>, String> {
-    let contents = fs::read_to_string(path)
-        .map_err(|err| format!("failed to read TextGrid '{}': {err}", path.display()))?;
+struct TextGridFallbackState {
+    in_item: bool,
+    item_is_interval_tier: bool,
+    item_is_words_tier: bool,
+    in_words_tier: bool,
+    cur_xmin: Option<f64>,
+    cur_xmax: Option<f64>,
+    words: Vec<ReferenceWord>,
+}
 
-    let mut in_item = false;
-    let mut item_is_interval_tier = false;
-    let mut item_is_words_tier = false;
-    let mut in_words_tier = false;
+impl TextGridFallbackState {
+    fn new() -> Self {
+        Self {
+            in_item: false,
+            item_is_interval_tier: false,
+            item_is_words_tier: false,
+            in_words_tier: false,
+            cur_xmin: None,
+            cur_xmax: None,
+            words: Vec::new(),
+        }
+    }
 
-    let mut cur_xmin: Option<f64> = None;
-    let mut cur_xmax: Option<f64> = None;
-    let mut words = Vec::new();
+    fn on_item_start(&mut self) {
+        self.in_item = true;
+        self.item_is_interval_tier = false;
+        self.item_is_words_tier = false;
+        self.in_words_tier = false;
+        self.cur_xmin = None;
+        self.cur_xmax = None;
+    }
 
-    for raw_line in contents.lines() {
-        let line = raw_line.trim();
+    fn process_line(&mut self, line: &str, path: &Path) -> Result<bool, String> {
         if line.starts_with("item [") {
-            in_item = true;
-            item_is_interval_tier = false;
-            item_is_words_tier = false;
-            in_words_tier = false;
-            cur_xmin = None;
-            cur_xmax = None;
-            continue;
+            self.on_item_start();
+            return Ok(true);
         }
-
-        if !in_item {
-            continue;
+        if !self.in_item {
+            return Ok(true);
         }
-
         if let Some(value) = parse_assignment_value(line, "class") {
-            item_is_interval_tier = value.eq_ignore_ascii_case("\"IntervalTier\"");
-            in_words_tier = item_is_interval_tier && item_is_words_tier;
-            continue;
+            self.item_is_interval_tier = value.eq_ignore_ascii_case("\"IntervalTier\"");
+            self.in_words_tier = self.item_is_interval_tier && self.item_is_words_tier;
+            return Ok(true);
         }
-
         if let Some(value) = parse_assignment_value(line, "name") {
-            item_is_words_tier = value.eq_ignore_ascii_case("\"words\"");
-            in_words_tier = item_is_interval_tier && item_is_words_tier;
-            continue;
+            self.item_is_words_tier = value.eq_ignore_ascii_case("\"words\"");
+            self.in_words_tier = self.item_is_interval_tier && self.item_is_words_tier;
+            return Ok(true);
         }
-
-        if !in_words_tier {
-            continue;
+        if !self.in_words_tier {
+            return Ok(true);
         }
-
         if let Some(value) = parse_assignment_value(line, "xmin") {
-            cur_xmin = Some(parse_number(value, path, "xmin")?);
-            continue;
+            self.cur_xmin = Some(parse_number(value, path, "xmin")?);
+            return Ok(true);
         }
-
         if let Some(value) = parse_assignment_value(line, "xmax") {
-            cur_xmax = Some(parse_number(value, path, "xmax")?);
-            continue;
+            self.cur_xmax = Some(parse_number(value, path, "xmax")?);
+            return Ok(true);
         }
-
         if let Some(value) = parse_assignment_value(line, "text") {
             let word = strip_quotes(value).trim().to_string();
             if !word.is_empty() {
-                let xmin = cur_xmin
+                let xmin = self
+                    .cur_xmin
                     .ok_or_else(|| format!("missing xmin before text in '{}'", path.display()))?;
-                let xmax = cur_xmax
+                let xmax = self
+                    .cur_xmax
                     .ok_or_else(|| format!("missing xmax before text in '{}'", path.display()))?;
-                words.push(ReferenceWord {
+                self.words.push(ReferenceWord {
                     word,
                     start_ms: seconds_to_ms(xmin, path)?,
                     end_ms: seconds_to_ms(xmax, path)?,
                 });
             }
-            cur_xmin = None;
-            cur_xmax = None;
+            self.cur_xmin = None;
+            self.cur_xmax = None;
+            return Ok(true);
         }
+        Ok(false)
     }
+}
 
-    if !words.is_empty() {
-        return Ok(words);
+fn parse_words_tier_fallback(path: &Path) -> Result<Vec<ReferenceWord>, String> {
+    let contents = fs::read_to_string(path)
+        .map_err(|err| format!("failed to read TextGrid '{}': {err}", path.display()))?;
+    let mut state = TextGridFallbackState::new();
+    for raw_line in contents.lines() {
+        state.process_line(raw_line.trim(), path)?;
     }
-    Err("no words found in fallback parse".to_string())
+    if state.words.is_empty() {
+        Err("no words found in fallback parse".to_string())
+    } else {
+        Ok(state.words)
+    }
 }
 
 fn seconds_to_ms(seconds: f64, source_path: &Path) -> Result<u64, String> {

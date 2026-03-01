@@ -14,6 +14,108 @@ fn matches_expected_word(cur_word: &str, expected_words: &[String], produced_wor
         .unwrap_or(true)
 }
 
+/// Input for one path step (read-only).
+struct PathStepInput<'a> {
+    s: usize,
+    frame: usize,
+    tid: usize,
+    stride_ms: f64,
+    blank_id: usize,
+    word_sep_id: usize,
+    expected_words: &'a [String],
+    chars: &'a [Option<char>],
+    log_probs: &'a [Vec<f32>],
+}
+
+/// Mutable state updated by process_path_step.
+struct PathStepState<'a> {
+    cur_word: &'a mut String,
+    start_frame: &'a mut Option<usize>,
+    end_frame: &'a mut usize,
+    emission_lp_accum: &'a mut Vec<f32>,
+    emission_margin_accum: &'a mut Vec<f32>,
+    coverage_frame_count: &'a mut usize,
+    out: &'a mut Vec<RawWord>,
+    prev_state: &'a mut Option<usize>,
+}
+
+/// Returns true if the rest of the loop iteration should be skipped (caller will set prev_state).
+fn process_path_step(input: &PathStepInput<'_>, state: &mut PathStepState<'_>) -> bool {
+    let frame_ms = input.frame as f64 * input.stride_ms;
+
+    if input.tid == input.blank_id {
+        tracing::debug!(
+            frame = input.frame,
+            frame_ms = format!("{:.0}", frame_ms),
+            state = input.s,
+            kind = "blank",
+            cur_word = state.cur_word.as_str(),
+            "grouping: blank frame"
+        );
+        *state.prev_state = Some(input.s);
+        return true;
+    }
+
+    if input.tid == input.word_sep_id {
+        tracing::debug!(
+            frame = input.frame,
+            frame_ms = format!("{:.0}", frame_ms),
+            state = input.s,
+            kind = "sep",
+            cur_word = state.cur_word.as_str(),
+            "grouping: separator frame"
+        );
+        if !state.cur_word.is_empty()
+            && !matches_expected_word(state.cur_word, input.expected_words, state.out.len())
+        {
+            *state.prev_state = Some(input.s);
+            return true;
+        }
+        flush_word(
+            state.cur_word,
+            state.start_frame,
+            *state.end_frame,
+            state.emission_lp_accum,
+            state.emission_margin_accum,
+            state.coverage_frame_count,
+            state.out,
+        );
+        *state.prev_state = Some(input.s);
+        return true;
+    }
+
+    if let Some(c) = input.chars[input.s] {
+        let is_new_state = *state.prev_state != Some(input.s);
+        if state.start_frame.is_none() {
+            *state.start_frame = Some(input.frame);
+        }
+        *state.end_frame = input.frame;
+        *state.coverage_frame_count += 1;
+        if is_new_state {
+            state
+                .emission_lp_accum
+                .push(input.log_probs[input.frame][input.tid]);
+            state
+                .emission_margin_accum
+                .push(top2_margin_logp(&input.log_probs[input.frame]));
+            state.cur_word.push(c);
+        }
+        tracing::debug!(
+            frame = input.frame,
+            frame_ms = format!("{:.0}", frame_ms),
+            state = input.s,
+            kind = "char",
+            char = %c,
+            new_state = is_new_state,
+            cur_word = state.cur_word.as_str(),
+            start_frame = state.start_frame,
+            end_frame = state.end_frame,
+            "grouping: char frame"
+        );
+    }
+    false
+}
+
 fn flush_word(
     cur_word: &mut String,
     start_frame: &mut Option<usize>,
@@ -98,73 +200,29 @@ pub(super) fn collect_profiled(
     // Instant::now() syscall overhead in the hot loop.
     for &(s, frame) in path {
         let tid = tokens[s];
-        let frame_ms = frame as f64 * stride_ms;
-
-        if tid == blank_id {
-            tracing::debug!(
-                frame,
-                frame_ms = format!("{:.0}", frame_ms),
-                state = s,
-                kind = "blank",
-                cur_word = cur_word.as_str(),
-                "grouping: blank frame"
-            );
-            prev_state = Some(s);
+        let step_input = PathStepInput {
+            s,
+            frame,
+            tid,
+            stride_ms,
+            blank_id,
+            word_sep_id,
+            expected_words,
+            chars,
+            log_probs,
+        };
+        let mut step_state = PathStepState {
+            cur_word: &mut cur_word,
+            start_frame: &mut start_frame,
+            end_frame: &mut end_frame,
+            emission_lp_accum: &mut emission_lp_accum,
+            emission_margin_accum: &mut emission_margin_accum,
+            coverage_frame_count: &mut coverage_frame_count,
+            out: &mut words,
+            prev_state: &mut prev_state,
+        };
+        if process_path_step(&step_input, &mut step_state) {
             continue;
-        }
-
-        if tid == word_sep_id {
-            tracing::debug!(
-                frame,
-                frame_ms = format!("{:.0}", frame_ms),
-                state = s,
-                kind = "sep",
-                cur_word = cur_word.as_str(),
-                "grouping: separator frame"
-            );
-            if !cur_word.is_empty()
-                && !matches_expected_word(&cur_word, expected_words, words.len())
-            {
-                prev_state = Some(s);
-                continue;
-            }
-            flush_word(
-                &mut cur_word,
-                &mut start_frame,
-                end_frame,
-                &mut emission_lp_accum,
-                &mut emission_margin_accum,
-                &mut coverage_frame_count,
-                &mut words,
-            );
-            prev_state = Some(s);
-            continue;
-        }
-        if let Some(c) = chars[s] {
-            let is_new_state = prev_state != Some(s);
-            if start_frame.is_none() {
-                start_frame = Some(frame);
-            }
-            end_frame = frame;
-            coverage_frame_count += 1;
-            if is_new_state {
-                // Confidence uses emission events (state changes), not repeated holds.
-                emission_lp_accum.push(log_probs[frame][tid]);
-                emission_margin_accum.push(top2_margin_logp(&log_probs[frame]));
-                cur_word.push(c);
-            }
-            tracing::debug!(
-                frame,
-                frame_ms = format!("{:.0}", frame_ms),
-                state = s,
-                kind = "char",
-                char = %c,
-                new_state = is_new_state,
-                cur_word = cur_word.as_str(),
-                start_frame = start_frame,
-                end_frame = end_frame,
-                "grouping: char frame"
-            );
         }
         prev_state = Some(s);
     }

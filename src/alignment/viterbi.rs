@@ -9,6 +9,26 @@ pub mod gpu;
 /// GPU DP threshold: below this T×S, CPU is faster than GPU launch overhead.
 const GPU_DP_THRESHOLD: usize = 40_000;
 
+/// Attempt GPU Viterbi when available (wgpu then cuda). Returns None to fall back to CPU.
+#[cfg(any(feature = "wgpu-dp", feature = "cuda-dp"))]
+fn try_gpu_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Option<Vec<(usize, usize)>> {
+    #[cfg(feature = "wgpu-dp")]
+    {
+        if let Some(path) = gpu::forced_align_viterbi_gpu(log_probs, tokens) {
+            return Some(path);
+        }
+        tracing::debug!("wgpu Viterbi unavailable, falling back to CPU");
+    }
+    #[cfg(feature = "cuda-dp")]
+    {
+        if let Some(path) = cuda::forced_align_viterbi_cuda(log_probs, tokens) {
+            return Some(path);
+        }
+        tracing::debug!("cuda Viterbi unavailable, falling back to CPU");
+    }
+    None
+}
+
 /// CTC Viterbi forced alignment.
 ///
 /// Dispatch priority:
@@ -17,24 +37,12 @@ const GPU_DP_THRESHOLD: usize = 40_000;
 /// 3. CPU fallback (always available)
 pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(usize, usize)> {
     let ts_product = log_probs.len() * tokens.len();
-
     if ts_product >= GPU_DP_THRESHOLD {
-        #[cfg(feature = "wgpu-dp")]
-        {
-            if let Some(path) = gpu::forced_align_viterbi_gpu(log_probs, tokens) {
-                return path;
-            }
-            tracing::debug!("wgpu Viterbi unavailable, falling back to CPU");
-        }
-        #[cfg(feature = "cuda-dp")]
-        {
-            if let Some(path) = cuda::forced_align_viterbi_cuda(log_probs, tokens) {
-                return path;
-            }
-            tracing::debug!("cuda Viterbi unavailable, falling back to CPU");
+        #[cfg(any(feature = "wgpu-dp", feature = "cuda-dp"))]
+        if let Some(path) = try_gpu_viterbi(log_probs, tokens) {
+            return path;
         }
     }
-
     forced_align_viterbi_cpu(log_probs, tokens)
 }
 

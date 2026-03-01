@@ -2,12 +2,7 @@ use std::collections::HashMap;
 
 use crate::types::TokenSequence;
 
-pub fn build_token_sequence_case_aware(
-    transcript: &str,
-    vocab: &HashMap<char, usize>,
-    blank_id: usize,
-    word_sep_id: usize,
-) -> TokenSequence {
+fn vocab_casing(vocab: &HashMap<char, usize>) -> (bool, bool) {
     let mut has_upper = false;
     let mut has_lower = false;
     for c in vocab.keys().copied().filter(|c| c.is_alphabetic()) {
@@ -18,44 +13,74 @@ pub fn build_token_sequence_case_aware(
             has_lower = true;
         }
     }
-    let cleaned = if has_upper && !has_lower {
+    (has_upper, has_lower)
+}
+
+fn normalize_transcript_case(transcript: &str, vocab: &HashMap<char, usize>) -> String {
+    let (has_upper, has_lower) = vocab_casing(vocab);
+    if has_upper && !has_lower {
         transcript.to_uppercase()
     } else {
         transcript.to_lowercase()
-    };
+    }
+}
 
+fn emit_word_into_sequence(
+    word: &str,
+    vocab: &HashMap<char, usize>,
+    word_sep_id: usize,
+    blank_id: usize,
+    tokens: &mut Vec<usize>,
+    chars: &mut Vec<Option<char>>,
+    normalized_words: &mut Vec<String>,
+) {
+    let mut emitted: Vec<(char, usize)> = Vec::new();
+    let mut normalized_word = String::new();
+    for c in word.chars() {
+        if let Some(&id) = vocab.get(&c) {
+            emitted.push((c, id));
+            normalized_word.push(c);
+        }
+    }
+    if emitted.is_empty() {
+        return;
+    }
+    if !normalized_words.is_empty() {
+        tokens.push(word_sep_id);
+        chars.push(Some('|'));
+        tokens.push(blank_id);
+        chars.push(None);
+    }
+    for (c, id) in emitted {
+        tokens.push(id);
+        chars.push(Some(c));
+        tokens.push(blank_id);
+        chars.push(None);
+    }
+    normalized_words.push(normalized_word);
+}
+
+pub fn build_token_sequence_case_aware(
+    transcript: &str,
+    vocab: &HashMap<char, usize>,
+    blank_id: usize,
+    word_sep_id: usize,
+) -> TokenSequence {
+    let cleaned = normalize_transcript_case(transcript, vocab);
     let mut tokens = vec![blank_id];
     let mut chars: Vec<Option<char>> = vec![None];
     let mut normalized_words = Vec::new();
 
     for word in cleaned.split_whitespace() {
-        let mut emitted: Vec<(char, usize)> = Vec::new();
-        let mut normalized_word = String::new();
-        for c in word.chars() {
-            if let Some(&id) = vocab.get(&c) {
-                emitted.push((c, id));
-                normalized_word.push(c);
-            }
-        }
-
-        if emitted.is_empty() {
-            continue;
-        }
-
-        if !normalized_words.is_empty() {
-            tokens.push(word_sep_id);
-            chars.push(Some('|'));
-            tokens.push(blank_id);
-            chars.push(None);
-        }
-
-        for (c, id) in emitted {
-            tokens.push(id);
-            chars.push(Some(c));
-            tokens.push(blank_id);
-            chars.push(None);
-        }
-        normalized_words.push(normalized_word);
+        emit_word_into_sequence(
+            word,
+            vocab,
+            word_sep_id,
+            blank_id,
+            &mut tokens,
+            &mut chars,
+            &mut normalized_words,
+        );
     }
 
     debug_assert_eq!(
