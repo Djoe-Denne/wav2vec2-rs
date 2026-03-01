@@ -58,11 +58,13 @@ fn flush_word(
 
 pub(super) struct ProfiledRawWords {
     pub(super) words: Vec<RawWord>,
+    #[allow(dead_code)]
     pub(super) conf_ms: f64,
 }
 
 /// Phase 1: Walk the Viterbi path and group character frames into words.
 /// Boundaries are tight — only character-emitting frames set start/end.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn collect_profiled(
     path: &[(usize, usize)],
     tokens: &[usize],
@@ -121,7 +123,7 @@ pub(super) fn collect_profiled(
                 "grouping: separator frame"
             );
             if !cur_word.is_empty()
-                && !matches_expected_word(&cur_word, &expected_words, words.len())
+                && !matches_expected_word(&cur_word, expected_words, words.len())
             {
                 prev_state = Some(s);
                 continue;

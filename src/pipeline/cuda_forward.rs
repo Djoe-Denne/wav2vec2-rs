@@ -47,7 +47,7 @@ impl CudaLogProbsBuffer {
     }
 
     /// Copy to host and return RuntimeInferenceOutput for grouping.
-    pub fn to_runtime_inference_output(self) -> Result<RuntimeInferenceOutput, AlignmentError> {
+    pub fn into_runtime_inference_output(self) -> Result<RuntimeInferenceOutput, AlignmentError> {
         let stream = self.ctx.default_stream();
         let flat = stream
             .clone_dtoh(&self.slice)

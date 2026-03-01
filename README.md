@@ -302,6 +302,20 @@ Each word receives a composite quality confidence score blending geometric mean 
 
 ---
 
+## Development / CI
+
+The project uses **Clippy with `-D warnings`** so that lint fixes are required before merge. Formatting is enforced with `cargo fmt --check`. No global Clippy allow flags are used in CI; a few lints are allowed locally where the team prefers readability (e.g. `clippy::needless_range_loop` in DP loops, `clippy::too_many_arguments` on grouping APIs). To run the same checks locally:
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --features onnx -- -D warnings
+cargo test --features onnx
+```
+
+If you add CI (e.g. GitHub Actions), run these three steps as blocking jobs.
+
+---
+
 ## License
 
 This project is licensed under the Mozilla Public License Version 2.0 — see the [LICENSE](https://www.mozilla.org/en-US/MPL/2.0/) file for details.

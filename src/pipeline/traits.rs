@@ -29,11 +29,11 @@ impl ForwardOutput {
 
     /// Obtain host log_probs for grouping. For Host, returns immediately.
     /// For CudaDevice, copies from GPU and applies log_softmax if needed.
-    pub fn to_runtime_inference_output(self) -> Result<RuntimeInferenceOutput, AlignmentError> {
+    pub fn into_runtime_inference_output(self) -> Result<RuntimeInferenceOutput, AlignmentError> {
         match self {
             ForwardOutput::Host(o) => Ok(o),
             #[cfg(feature = "cuda-dp")]
-            ForwardOutput::CudaDevice(buf) => buf.to_runtime_inference_output(),
+            ForwardOutput::CudaDevice(buf) => buf.into_runtime_inference_output(),
         }
     }
 }

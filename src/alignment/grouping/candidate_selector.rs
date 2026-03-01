@@ -65,6 +65,7 @@ pub(super) fn select_best(
     best
 }
 
+#[allow(clippy::needless_range_loop)]
 fn score_candidate(
     raw_words: &[RawWord],
     candidate_words: &[RawWord],

@@ -113,7 +113,7 @@ impl ForcedAligner {
         }
 
         let (t_len, _, _) = forward_output.metadata();
-        let min_frames = (token_sequence.tokens.len() + 1) / 2;
+        let min_frames = token_sequence.tokens.len().div_ceil(2);
         if t_len < min_frames {
             return Err(AlignmentError::invalid_input(format!(
                 "audio too short for transcript: {t_len} frames < {min_frames} required"
@@ -239,7 +239,7 @@ impl ForcedAligner {
         }
 
         let t_len = num_frames_t;
-        let min_frames = (token_sequence.tokens.len() + 1) / 2;
+        let min_frames = token_sequence.tokens.len().div_ceil(2);
         if t_len < min_frames {
             return Err(AlignmentError::invalid_input(format!(
                 "audio too short for transcript: {t_len} frames < {min_frames} required"
@@ -416,7 +416,7 @@ impl ForcedAligner {
         }
 
         let t_len = num_frames_t;
-        let min_frames = (token_sequence.tokens.len() + 1) / 2;
+        let min_frames = token_sequence.tokens.len().div_ceil(2);
         if t_len < min_frames {
             return Err(AlignmentError::invalid_input(format!(
                 "audio too short for transcript: {t_len} frames < {min_frames} required"
@@ -522,11 +522,14 @@ fn duration_to_ms(duration: Duration) -> f64 {
     duration.as_secs_f64() * 1000.0
 }
 
+type ViterbiPath = Vec<(usize, usize)>;
+type LogProbs = Vec<Vec<f32>>;
+
 fn dispatch_viterbi(
     sequence_aligner: &dyn SequenceAligner,
     forward_output: ForwardOutput,
     tokens: &[usize],
-) -> Result<(Vec<(usize, usize)>, Vec<Vec<f32>>), AlignmentError> {
+) -> Result<(ViterbiPath, LogProbs), AlignmentError> {
     match forward_output {
         #[cfg(feature = "cuda-dp")]
         ForwardOutput::CudaDevice(buf) => {
@@ -539,7 +542,7 @@ fn dispatch_viterbi(
                     "CUDA Viterbi failed; zero-copy path unavailable",
                 ));
             }
-            let runtime_output = buf.to_runtime_inference_output()?;
+            let runtime_output = buf.into_runtime_inference_output()?;
             Ok((path, runtime_output.log_probs))
         }
         ForwardOutput::Host(o) => {

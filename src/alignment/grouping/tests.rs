@@ -103,6 +103,7 @@ fn expand_large_gap_preserves_interior_silence() {
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)]
 fn all_policies_preserve_non_overlapping_boundaries() {
     let words = vec![
         make_raw("A", 5, 10),
@@ -138,6 +139,7 @@ fn selector_prefers_balanced_when_scores_tie() {
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)]
 fn selector_uses_blank_boundary_evidence() {
     let raw = vec![make_raw("A", 5, 10), make_raw("B", 20, 25)];
     let candidate_blank_heavy = vec![make_raw("A", 5, 13), make_raw("B", 20, 25)];
@@ -229,6 +231,7 @@ fn group_into_words_basic() {
 }
 
 #[test]
+#[allow(clippy::needless_range_loop)]
 fn confidence_is_stable_across_repeated_state_holds() {
     let tokens = vec![0, 1, 0];
     let chars: Vec<Option<char>> = vec![None, Some('A'), None];

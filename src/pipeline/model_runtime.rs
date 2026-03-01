@@ -28,7 +28,7 @@ fn build_onnx_runtime_backend(
 ) -> Result<Box<dyn RuntimeBackend>, AlignmentError> {
     #[cfg(feature = "onnx")]
     {
-        return Ok(Box::new(OnnxRuntimeBackend::load(config)?));
+        Ok(Box::new(OnnxRuntimeBackend::load(config)?))
     }
 
     #[cfg(not(feature = "onnx"))]

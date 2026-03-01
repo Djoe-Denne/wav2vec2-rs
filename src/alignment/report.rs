@@ -955,7 +955,7 @@ fn median_sorted(sorted_values: &[f64]) -> f64 {
         return 0.0;
     }
     let mid = sorted_values.len() / 2;
-    if sorted_values.len() % 2 == 0 {
+    if sorted_values.len().is_multiple_of(2) {
         (sorted_values[mid - 1] + sorted_values[mid]) / 2.0
     } else {
         sorted_values[mid]
@@ -1025,6 +1025,7 @@ fn checked_f32(value: f64, metric_name: &str) -> Result<f32, AlignmentError> {
 mod tests {
     use super::*;
 
+    #[allow(clippy::too_many_arguments)]
     fn sample_sentence(
         id: &str,
         split: Split,

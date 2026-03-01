@@ -1,5 +1,4 @@
 use crate::types::{WordConfidenceStats, WordTiming};
-use std::time::Duration;
 #[cfg(feature = "alignment-profiling")]
 use std::time::Instant;
 
@@ -28,6 +27,7 @@ pub struct ProfiledWordGroupingOutput {
     pub expand_select_ms: f64,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn group_into_words(
     path: &[(usize, usize)],
     tokens: &[usize],
@@ -51,6 +51,7 @@ pub fn group_into_words(
     .words
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn group_into_words_profiled(
     path: &[(usize, usize)],
     tokens: &[usize],
@@ -97,15 +98,14 @@ pub fn group_into_words_profiled(
             ));
         }
 
-        let result = match candidate_selector::select_best(&raw, candidates, log_probs, blank_id) {
+        match candidate_selector::select_best(&raw, candidates, log_probs, blank_id) {
             Some(chosen) => (chosen.policy, chosen.words, Some(chosen.score)),
             None => (
                 blank_expansion::ExpansionPolicy::Balanced,
                 blank_expansion::expand(raw, first_frame, last_frame),
                 None,
             ),
-        };
-        result
+        }
     });
 
     if let Some(score) = selected_score {

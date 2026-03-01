@@ -40,6 +40,7 @@ pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(us
 
 
 /// CPU-only CTC Viterbi (always available).
+#[allow(clippy::needless_range_loop)]
 pub fn forced_align_viterbi_cpu(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(usize, usize)> {
     let t_len = log_probs.len();
     let s_len = tokens.len();

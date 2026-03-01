@@ -11,6 +11,7 @@ struct ConvLayer {
 }
 
 impl ConvLayer {
+    #[allow(clippy::too_many_arguments)]
     fn load(
         in_c: usize,
         out_c: usize,

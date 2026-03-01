@@ -4,8 +4,6 @@
 //! **GPU is asynchronous**: peak must be read after device sync; otherwise GPU work
 //! may not be reflected. This module runs the sync before reading GPU.
 
-#![cfg(feature = "alignment-profiling")]
-
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread;

@@ -4,7 +4,9 @@ use super::RawWord;
 /// expansion. Gaps shorter than 2× this value are split at the midpoint
 /// (phonetic transitions). Longer gaps are capped so that the interior
 /// silence stays unattributed — matching MFA's explicit silence intervals.
+#[allow(dead_code)]
 pub(super) const MAX_EXPANSION_FRAMES: usize = 10;
+#[allow(dead_code)]
 const SHORT_GAP_SPLIT_MAX_FRAMES: usize = 2 * MAX_EXPANSION_FRAMES;
 const BALANCED_MAX_LEFT_EXPANSION_FRAMES: usize = 12;
 const BALANCED_MAX_RIGHT_PULLBACK_FRAMES: usize = 6;
@@ -82,6 +84,7 @@ pub(super) fn expand(words: Vec<RawWord>, _first_frame: usize, _last_frame: usiz
     expand_with_policy(words, _first_frame, _last_frame, ExpansionPolicy::Balanced)
 }
 
+#[allow(clippy::needless_range_loop)]
 pub(super) fn expand_with_policy(
     mut words: Vec<RawWord>,
     _first_frame: usize,
