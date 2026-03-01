@@ -1,589 +1,307 @@
-# wav2vec2-rs
+# wav2vec2-align
 
-## Modular Pipeline Architecture
+A Rust library for **CTC forced alignment** using wav2vec2 acoustic models. Maps a known transcript onto an audio signal at word level, producing millisecond-precision timing boundaries with per-word confidence scores.
 
-The crate is now organized by concept (`config`, `model`, `alignment`, `pipeline`,
-`types`, `error`) and exposes a builder-first API so developers can replace core
-alignment bricks.
+Forced alignment solves the problem of synchronizing text with speech: given audio and its transcript, it determines exactly *when* each word is spoken. This is foundational for subtitle generation, speech corpus annotation, audiobook segmentation, and pronunciation analysis.
 
-Default builder usage:
+The library implements the full pipeline — from raw audio to timestamped words — with three parallel Viterbi backends (CPU, wgpu, CUDA) and a multi-policy blank expansion strategy that produces MFA-quality word boundaries.
 
-```rust
-use wav2vec2_rs::{ForcedAlignerBuilder, Wav2Vec2Config};
+---
 
-let config = Wav2Vec2Config {
-    model_path: "models/wav2vec2-base-960h/model.safetensors".into(),
-    config_path: "models/wav2vec2-base-960h/config.json".into(),
-    vocab_path: "models/wav2vec2-base-960h/vocab.json".into(),
-    device: "cpu".into(),
-    expected_sample_rate_hz: Wav2Vec2Config::DEFAULT_SAMPLE_RATE_HZ,
-};
+## Acknowledgments
 
-let aligner = ForcedAlignerBuilder::new(config).build()?;
+This project was heavily inspired by [wav2vec2aligner](https://github.com/EveryVoiceTTS/wav2vec2aligner) by EveryVoiceTTS. The original Python/TorchAudio implementation served both as a reference for understanding the alignment pipeline and as a comparison baseline for benchmarking. The benchmark harness on the Python side was also built on top of that project (see the patch file `wav2vec2aligner-main.perf-monitoring.patch`). Many thanks to the authors for making their work available.
+
+---
+
+## Features
+
+- **CTC Viterbi forced alignment** with reachability-band pruning for O(T·S) DP instead of naive O(T·S²)
+- **Three compute backends**: CPU (always available), wgpu (Vulkan/DX12/Metal), CUDA with zero-copy ORT integration
+- **Two model runtimes**: Candle (pure Rust, safetensors) and ONNX Runtime (with CUDA EP support)
+- **Zero-copy CUDA path**: when ORT runs on GPU, log-softmax + Viterbi execute entirely on device — only the T-length state path (T×4 bytes) is copied back to host
+- **Multi-policy blank expansion** with acoustic-evidence candidate selection for robust word boundaries
+- **Deterministic composite confidence scoring**: blends geometric mean emission probability, top-2 margin, p10 log-prob, and boundary blank evidence with piecewise-linear calibration
+- **Evaluation and benchmark reporting**: structural, timing, confidence, and performance metrics with per-split aggregation, outlier ranking, and per-word traces
+
+---
+
+## Installation
+
+### Prerequisites
+
+- **Rust 1.75+** (edition 2021)
+- A wav2vec2 CTC model in safetensors (Candle) or ONNX format, with `config.json` and `vocab.json`
+- Audio must be **16 kHz mono f32** (the standard wav2vec2 sample rate)
+
+### Feature flags
+
+| Feature                  | Description                                                        |
+|--------------------------|--------------------------------------------------------------------|
+| `gpu-dp`                 | wgpu Viterbi backend (Vulkan, DX12, Metal)                        |
+| `cuda-dp`                | CUDA Viterbi backend via cudarc + NVRTC (requires CUDA toolkit)   |
+| `onnx`                   | ONNX Runtime model backend (CPU or CUDA execution provider)       |
+| `alignment-profiling`    | Per-stage timing and memory profiling (benchmark mode)             |
+
+### Basic (CPU only, Candle runtime)
+
+```bash
+cargo build --release
 ```
 
-### Switch runtime backend
+### With GPU Viterbi (wgpu)
 
-`ForcedAlignerBuilder` defaults to the Candle runtime. You can switch to ONNX Runtime
-through the builder:
+```bash
+cargo build --release --features gpu-dp
+```
+
+### Full CUDA pipeline (ONNX + CUDA Viterbi zero-copy)
+
+```bash
+cargo build --release --features "onnx,cuda-dp"
+```
+
+This gives the fastest path: ORT produces logits on GPU → on-device log-softmax kernel → on-device Viterbi → only the state path array is transferred to host.
+
+### With profiling
+
+```bash
+cargo build --release --features "onnx,cuda-dp,alignment-profiling"
+```
+
+---
+
+## Usage
+
+### As a library
 
 ```rust
-use wav2vec2_rs::{ForcedAlignerBuilder, RuntimeKind, Wav2Vec2Config};
+use wav2vec2_align::{ForcedAlignerBuilder, Wav2Vec2Config, AlignmentInput};
 
 let config = Wav2Vec2Config {
-    model_path: "models/wav2vec2-base-960h/model.onnx".into(),
-    config_path: "models/wav2vec2-base-960h/config.json".into(),
-    vocab_path: "models/wav2vec2-base-960h/vocab.json".into(),
-    device: "cuda".into(), // "cpu" and "cuda" are supported
-    expected_sample_rate_hz: Wav2Vec2Config::DEFAULT_SAMPLE_RATE_HZ,
+    model_path: "model.safetensors".into(), // or "model.onnx"
+    config_path: "config.json".into(),
+    vocab_path: "vocab.json".into(),
+    device: "cpu".into(), // or "cuda"
+    expected_sample_rate_hz: 16_000,
 };
 
 let aligner = ForcedAlignerBuilder::new(config)
-    .with_runtime_kind(RuntimeKind::Onnx)
+    // .with_runtime_kind(RuntimeKind::Onnx) // for ONNX backend
     .build()?;
-```
 
-Notes:
-
-- ONNX support is behind the `onnx` feature: build with `--features onnx`.
-- ⚠️ **ONNX Runtime with CUDA**: To use the ONNX runtime with CUDA, you need CUDA 12.8 or 13.1 and cuDNN 9+ installed and on your PATH.
-- Candle keeps working as before (and remains the default path).
-- `model_path` points to runtime-specific weights:
-  - Candle: `model.safetensors`
-  - ONNX: `model.onnx`
-
-### Add custom pipeline components
-
-You can replace any pipeline brick by implementing one of the public traits:
-
-- `Tokenizer`
-- `SequenceAligner`
-- `WordGrouper`
-
-Then inject your implementations into the builder with:
-
-- `.with_tokenizer(...)`
-- `.with_sequence_aligner(...)`
-- `.with_word_grouper(...)`
-
-Example:
-
-```rust
-use std::collections::HashMap;
-use wav2vec2_rs::{
-    AlignmentError, ForcedAlignerBuilder, SequenceAligner, TokenSequence, Tokenizer, Wav2Vec2Config,
-    WordGrouper, WordTiming,
+let input = AlignmentInput {
+    sample_rate_hz: 16_000,
+    samples: audio_f32_16khz,
+    transcript: "the quick brown fox".into(),
+    normalized: None, // auto-computed; or precompute with normalize_audio()
 };
 
-struct MyTokenizer;
-impl Tokenizer for MyTokenizer {
-    fn tokenize(
-        &self,
-        transcript: &str,
-        vocab: &HashMap<char, usize>,
-        blank_id: usize,
-        _word_sep_id: usize,
-    ) -> TokenSequence {
-        // Minimal example: per-char tokens + blank
-        let mut tokens = vec![blank_id];
-        let mut chars = vec![None];
-        for c in transcript.chars() {
-            if let Some(&id) = vocab.get(&c) {
-                tokens.push(id);
-                chars.push(Some(c));
-                tokens.push(blank_id);
-                chars.push(None);
-            }
-        }
-        TokenSequence { tokens, chars }
-    }
+let output = aligner.align(&input)?;
+for word in &output.words {
+    println!("{}: [{}, {}) ms  conf={:.2}",
+        word.word, word.start_ms, word.end_ms,
+        word.confidence.unwrap_or(0.0));
 }
-
-struct MyAligner;
-impl SequenceAligner for MyAligner {
-    fn align_path(
-        &self,
-        _log_probs: &[Vec<f32>],
-        _tokens: &[usize],
-    ) -> Result<Vec<(usize, usize)>, AlignmentError> {
-        // Replace with your own alignment algorithm.
-        Ok(Vec::new())
-    }
-}
-
-struct MyGrouper;
-impl WordGrouper for MyGrouper {
-    fn group_words(
-        &self,
-        _path: &[(usize, usize)],
-        _token_sequence: &TokenSequence,
-        _log_probs: &[Vec<f32>],
-        _blank_id: usize,
-        _word_sep_id: usize,
-        _stride_ms: f64,
-    ) -> Vec<WordTiming> {
-        // Replace with your own grouping logic.
-        Vec::new()
-    }
-}
-
-let config = Wav2Vec2Config {
-    model_path: "models/wav2vec2-base-960h/model.safetensors".into(),
-    config_path: "models/wav2vec2-base-960h/config.json".into(),
-    vocab_path: "models/wav2vec2-base-960h/vocab.json".into(),
-    device: "cpu".into(),
-    expected_sample_rate_hz: Wav2Vec2Config::DEFAULT_SAMPLE_RATE_HZ,
-};
-
-let aligner = ForcedAlignerBuilder::new(config)
-    .with_tokenizer(Box::new(MyTokenizer))
-    .with_sequence_aligner(Box::new(MyAligner))
-    .with_word_grouper(Box::new(MyGrouper))
-    .build()?;
 ```
 
-## Prepare Test Data
+### Alignment report CLI (benchmark binary)
 
-This project uses LibriSpeech test sets as reference test data.
-The setup script downloads archives from OpenSLR, extracts them, and generates
-reference word alignments with a PyTorch `Wav2Vec2ForCTC` model.
+The project ships with an `alignment_report` binary that serves as both a quality evaluation tool and a performance benchmarker. It processes LibriSpeech test sets, compares predicted word timings against reference TextGrid files, and optionally produces detailed per-stage performance reports.
 
-By default, it loads the local model from `models/wav2vec2-base-960h`.
-
-### 1) Install Python dependencies
-
-CUDA 12.8 (priority):
+#### Generating a quality report (JSON)
 
 ```bash
-pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+cargo run --release --features "onnx,report-cli" --bin alignment_report -- \
+    --model-dir models/onnx_wav2vec2_base_960h \
+    --dataset-root test-data \
+    --device cuda \
+    --runtime onnx \
+    --output-format json
 ```
 
-CUDA 13.0:
+This produces a JSON report with per-sentence structural, timing, and confidence metrics, plus aggregate statistics across test-clean and test-other splits.
+
+#### Generating TextGrid output
 
 ```bash
-pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple
+cargo run --release --features "onnx,report-cli" --bin alignment_report -- \
+    --model-dir models/onnx_wav2vec2_base_960h \
+    --dataset-root test-data \
+    --device cuda \
+    --runtime onnx \
+    --output-format textgrid
 ```
 
-CPU fallback:
+Writes `.TextGrid` files alongside each LibriSpeech `.flac` file, with tiers for words, word-confidence, and transcript.
+
+#### Running performance benchmarks
 
 ```bash
-pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple
+cargo run --release --features "onnx,cuda-dp,alignment-profiling,report-cli" \
+    --bin alignment_report -- \
+    --model-dir models/onnx_wav2vec2_base_960h \
+    --dataset-root test-data \
+    --device cuda \
+    --runtime onnx \
+    --output-format perf \
+    --perf-out target/perf/rust-cuda.jsonl \
+    --perf-warmup 10 \
+    --perf-repeats 30 \
+    --perf-aggregate median \
+    --perf-append
 ```
 
-### 2) Run setup script
+See [BENCHMARKS.md](./BENCHMARKS.md) for a detailed description of the benchmark methodology, known biases, and how to reproduce results.
 
-```bash
-python scripts/pytorch_aligner.py
-```
+#### Key CLI flags
 
-The script will:
+| Flag | Description |
+|------|-------------|
+| `--model-dir` | Path to model directory (must contain model weights, `config.json`, `vocab.json`) |
+| `--dataset-root` | Path to test data root (expects `LibriSpeech/test-clean` and `LibriSpeech/test-other` underneath) |
+| `--device` | `cpu` or `cuda` |
+| `--runtime` | `onnx` or `candle` |
+| `--output-format` | `json` (quality report), `textgrid` (TextGrid files), `perf` (performance only) |
+| `--limit` / `--offset` | Process a subset of cases |
+| `--cases-file` | Filter to specific utterance IDs |
+| `--perf-out` | Output path for perf JSON/JSONL |
+| `--perf-warmup` | Number of warm-up iterations (default: 10) |
+| `--perf-repeats` | Number of timed repeats per utterance (default: 30) |
+| `--perf-aggregate` | `median` or `mean` |
+| `--perf-append` | Append JSONL records (one per utterance) instead of writing a single JSON file |
+| `--perf-scaling-report` | Print T×S scaling analysis with Pearson correlation |
 
-- download `test-clean.tar.gz` and `test-other.tar.gz` from OpenSLR
-- extract data to `test-data/LibriSpeech/`
-- generate alignment references:
-  - `test-data/alignments/test-clean.json`
-  - `test-data/alignments/test-other.json`
-- run emissions with PyTorch Wav2Vec2 (`Wav2Vec2ForCTC`)
-- decode FLAC audio with `soundfile` (no TorchCodec requirement)
+### Python comparison script
 
-### 3) Optional flags
-
-Regenerate everything:
-
-```bash
-python scripts/pytorch_aligner.py --overwrite
-```
-
-Run a subset only:
-
-```bash
-python scripts/pytorch_aligner.py --subsets test-clean
-```
-
-Limit aligned utterances per subset:
-
-```bash
-python scripts/pytorch_aligner.py --limit 100
-```
-
-Use a different local model directory:
-
-```bash
-python scripts/pytorch_aligner.py --model-dir models/wav2vec2-base-960h
-```
-
-### 4) Generate LibriSpeech TextGrid files in batch (wav2vec2aligner)
-
-Create and activate a virtual environment (Bash):
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-```
-
-Create and activate a virtual environment (PowerShell):
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-```
-
-Install CUDA-enabled PyTorch + script dependencies (Bash, pick one):
-
-```bash
-# CUDA 12.8
-pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
-
-# CUDA 13.0
-# pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple
-```
-
-Install CUDA-enabled PyTorch + script dependencies (PowerShell, pick one):
-
-```powershell
-# CUDA 12.8
-pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
-
-# CUDA 13.0
-# pip install -r scripts/requirements.txt --index-url https://download.pytorch.org/whl/cu130 --extra-index-url https://pypi.org/simple
-```
-
-Install the local aligner package (Bash / PowerShell):
-
-```bash
-pip install -e wav2vec2aligner-main
-```
-
-```powershell
-pip install -e wav2vec2aligner-main
-```
-
-Clean existing TextGrid files before regeneration (Bash):
-
-```bash
-find test-data/LibriSpeech -type f -name "*.TextGrid" -delete
-```
-
-Clean existing TextGrid files before regeneration (PowerShell):
-
-```powershell
-Get-ChildItem .\test-data\LibriSpeech -Recurse -Filter *.TextGrid | Remove-Item -Force
-```
-
-Run batch TextGrid generation (Bash; model loads once, outputs overwrite existing `.TextGrid` files):
+A companion Python script reuses the original [wav2vec2aligner](https://github.com/EveryVoiceTTS/wav2vec2aligner) to generate TextGrid files and perf records on the same LibriSpeech data, enabling direct comparison:
 
 ```bash
 python scripts/wav2vec2aligner_librispeech_textgrids.py \
-  --dataset-root test-data/LibriSpeech \
-  --subsets test-clean,test-other \
-  --device cuda \
-  --overwrite
+    --dataset-root test-data/LibriSpeech \
+    --device cuda \
+    --perf-out target/perf/python-cuda.jsonl \
+    --perf-warmup 10 \
+    --perf-repeats 30 \
+    --perf-aggregate median \
+    --perf-append
 ```
 
-Run batch TextGrid generation (PowerShell; model loads once, outputs overwrite existing `.TextGrid` files):
+A patch file (`wav2vec2aligner-main.perf-monitoring.patch`) adds profiling instrumentation to the original Python project so that per-stage timings (forward, post, dp, group, conf) are recorded in the same JSONL schema as the Rust implementation.
 
-```powershell
-python .\scripts\wav2vec2aligner_librispeech_textgrids.py `
-  --dataset-root .\test-data\LibriSpeech `
-  --subsets test-clean,test-other `
-  --device cuda `
-  --overwrite
+---
+
+## Test data
+
+Benchmarks and evaluation use the [LibriSpeech](https://www.openslr.org/12) corpus, specifically the **test-clean** and **test-other** subsets. Download them from:
+
+> **https://www.openslr.org/12**
+
+Extract them under `test-data/LibriSpeech/test-clean` and `test-data/LibriSpeech/test-other`.
+
+---
+
+## Architecture
+
+### Pipeline stages
+
+```
+Audio [f32] ──► Normalize ──► Forward Pass ──► Log-softmax ──► Viterbi DP ──► Grouping ──► Words
+                  (μ=0,σ=1)   (Candle|ORT)    (CPU|GPU)       (CPU|wgpu|CUDA) (expand+score)
 ```
 
-Quick smoke run (Bash):
+Each stage is abstracted behind a trait (`RuntimeBackend`, `SequenceAligner`, `Tokenizer`, `WordGrouper`) and can be replaced via the builder. The default implementations are wired in `pipeline::defaults`.
 
-```bash
-python scripts/wav2vec2aligner_librispeech_textgrids.py \
-  --dataset-root test-data/LibriSpeech \
-  --subsets test-clean \
-  --limit 5 \
-  --progress-every 1 \
-  --device cuda \
-  --overwrite
+### Module layout
+
+```
+src/
+├── alignment/
+│   ├── viterbi.rs              # Dispatch: CPU → wgpu → CUDA based on T×S threshold
+│   ├── cuda/
+│   │   ├── viterbi.cu          # CUDA kernels: log_softmax_rows, viterbi_forward, viterbi_backtrace
+│   │   └── viterbi_cuda.rs     # cudarc host code, zero-copy + upload variants
+│   ├── gpu/
+│   │   ├── viterbi.wgsl        # WGSL compute shader: single-workgroup wavefront
+│   │   └── viterbi_gpu.rs      # wgpu host code, buffer management, blocking readback
+│   ├── tokenization.rs         # Case-aware CTC token sequence builder (blank-interleaved)
+│   ├── grouping/
+│   │   ├── path_to_words.rs    # Phase 1: walk Viterbi path → raw word boundaries
+│   │   ├── blank_expansion.rs  # Phase 2: expand boundaries into blank frames (3 policies)
+│   │   ├── candidate_selector.rs # Phase 3: score candidates, pick best expansion
+│   │   └── mod.rs              # Orchestration, quality confidence, calibration
+│   └── report.rs               # Evaluation: structural/timing/confidence metrics
+├── model/
+│   ├── ctc_model.rs            # Wav2Vec2ForCTC (Candle)
+│   ├── encoder.rs              # Transformer encoder with positional conv
+│   ├── feature_extractor.rs    # Conv1d stack with weight-norm, GroupNorm/LayerNorm
+│   ├── feature_projection.rs   # Linear projection to hidden dim
+│   └── layers.rs               # LayerNorm, GroupNorm1d (custom for Candle)
+├── pipeline/
+│   ├── builder.rs              # ForcedAlignerBuilder: wire config → pipeline
+│   ├── runtime.rs              # ForcedAligner: align() and align_profiled()
+│   ├── model_runtime.rs        # CandleRuntimeBackend, OnnxRuntimeBackend
+│   ├── cuda_forward.rs         # CudaLogProbsBuffer: zero-copy device buffer
+│   ├── defaults.rs             # Default trait implementations
+│   ├── traits.rs               # RuntimeBackend, Tokenizer, SequenceAligner, WordGrouper
+│   └── memory_tracker.rs       # Per-stage RSS + GPU memory profiling
+├── config.rs                   # Wav2Vec2Config, Wav2Vec2ModelConfig
+├── types.rs                    # AlignmentInput, AlignmentOutput, WordTiming, WordConfidenceStats
+└── error.rs                    # AlignmentError (Io, Json, Runtime, InvalidInput)
+
+src/bin/
+├── alignment_report.rs         # CLI binary: quality reports, TextGrid generation, perf benchmarks
+└── alignment_report/
+    ├── json_report_formatter.rs      # Quality report JSON serializer
+    ├── perf_report_formatter.rs      # Perf benchmark JSON/JSONL serializer
+    └── text_grid_report_formatter.rs # TextGrid output writer
+
+scripts/
+└── wav2vec2aligner_librispeech_textgrids.py  # Python comparison benchmark script
 ```
 
-Quick smoke run (PowerShell):
+### CTC Viterbi algorithm
 
-```powershell
-python .\scripts\wav2vec2aligner_librispeech_textgrids.py `
-  --dataset-root .\test-data\LibriSpeech `
-  --subsets test-clean `
-  --limit 5 `
-  --progress-every 1 `
-  --device cuda `
-  --overwrite
-```
+The core DP aligns a CTC token sequence `S` (blank-interleaved: `⟨blank, c₁, blank, |, blank, c₂, blank, ...⟩`) against `T` frames of log-probabilities from the acoustic model.
 
-### CUDA launch quick reference (script + bin)
+**State transitions** follow CTC constraints: stay on current state (`s → s`), step forward (`s-1 → s`), or skip (`s-2 → s`, only if `tokens[s] ≠ tokens[s-2]` to prevent skipping blanks between repeated characters).
 
-Python script (Bash):
+**Reachability band pruning** avoids touching unreachable cells — at each time step `t`, only states in `[curr_start, curr_end]` need to be evaluated. This is significant for long sequences.
 
-```bash
-python scripts/wav2vec2aligner_librispeech_textgrids.py \
-  --dataset-root test-data/LibriSpeech \
-  --subsets test-clean,test-other \
-  --device cuda \
-  --overwrite
-```
+**Backpointer storage** uses only 2 bits per cell. Backtrace reconstructs the full path in O(T).
 
-Python script (PowerShell):
+### Three Viterbi backends
 
-```powershell
-python .\scripts\wav2vec2aligner_librispeech_textgrids.py `
-  --dataset-root .\test-data\LibriSpeech `
-  --subsets test-clean,test-other `
-  --device cuda `
-  --overwrite
-```
+All three backends implement identical DP logic and produce bit-identical paths. The dispatch in `viterbi.rs` selects based on T×S product (below 40,000, CPU is faster than GPU launch overhead).
 
-Rust bin (`alignment_report`) TextGrid mode on CUDA (Bash):
+There is no strong performance reason for having both the wgpu and CUDA backends — they achieve comparable throughput on the same hardware. Both exist because building them was a fun exercise in exploring GPU compute from Rust through two very different APIs (portable graphics API vs. vendor-native toolkit).
 
-```bash
-cargo run --features "report-cli,cuda" --bin alignment_report -- \
-  --dataset-root test-data \
-  --output-format textgrid \
-  --textgrid-suffix _cmp \
-  --device cuda
-```
+**CPU** — Scalar DP with ping-pong score arrays. Two `Vec<f32>` of length S are swapped each time step. Reference implementation, always available.
 
-Rust bin (`alignment_report`) TextGrid mode on CUDA (PowerShell):
+**wgpu** (`gpu-dp` feature) — A single compute shader dispatch runs the entire T-step DP in one workgroup of 256 threads using `workgroupBarrier()` synchronization. Only the T-length path buffer is copied back to host. Supports Vulkan, DX12, and Metal.
 
-```powershell
-cargo run --features "report-cli,cuda" --bin alignment_report -- `
-  --dataset-root .\test-data `
-  --output-format textgrid `
-  --textgrid-suffix _cmp `
-  --device cuda
-```
+**CUDA** (`cuda-dp` feature) — Three kernels compiled at runtime via NVRTC: `log_softmax_rows` (shared-memory reduction), `viterbi_forward` (wavefront DP in dynamic shared memory), and `viterbi_backtrace` (single-thread O(T) path extraction). When ORT runs on CUDA, the entire log-softmax → Viterbi → backtrace pipeline executes on device with zero-copy — only the final path array transfers to host.
 
-Perf mode examples (keep TextGrid output + write perf JSON sidecar):
+### Tokenization
 
-Python script perf mode (Bash):
+`build_token_sequence_case_aware` detects vocabulary casing (uppercase-only, lowercase-only, or mixed) and normalizes the transcript accordingly. It produces a blank-interleaved token sequence with a parallel `chars` array mapping each position to its character (or `None` for blanks).
 
-```bash
-python scripts/wav2vec2aligner_librispeech_textgrids.py \
-  --dataset-root test-data/LibriSpeech \
-  --subsets test-clean,test-other \
-  --device cuda \
-  --overwrite \
-  --perf-out target/perf/python-perf.json \
-  --perf-warmup 10 \
-  --perf-repeats 30 \
-  --perf-aggregate median
-```
+### Word grouping and blank expansion
 
-```powershell
-python scripts/wav2vec2aligner_librispeech_textgrids.py `
-  --dataset-root test-data/LibriSpeech `
-  --subsets test-clean,test-other `
-  --device cuda `
-  --overwrite `
-  --perf-out target/perf/python-perf.json `
-  --perf-warmup 10 `
-  --perf-repeats 30 `
-  --perf-aggregate median
-```
+Grouping happens in three phases:
 
-Rust bin perf mode (Bash). Requires `alignment-profiling` feature; perf args are only present when this feature is enabled:
+1. **Path to raw words** — Walks the Viterbi path frame by frame, building tight `[start_frame, end_frame]` boundaries and accumulating emission log-probs and top-2 margins per word.
 
-```bash
-cargo run --features "report-cli,cuda,alignment-profiling" --bin alignment_report -- \
-  --dataset-root test-data \
-  --output-format textgrid \
-  --device cuda \
-  --perf-out target/perf/rust-perf.json \
-  --perf-warmup 10 \
-  --perf-repeats 30 \
-  --perf-aggregate median
-```
+2. **Blank expansion** — Three policies (Balanced, ConservativeStart, AggressiveTail) expand boundaries into adjacent blank regions with different trade-offs for left expansion, right pullback, and minimum interior silence.
 
-Rust bin perf append mode (JSONL + summary) (PowerShell):
+3. **Candidate selection** — All three candidates are scored using boundary blank evidence, shift penalty, and pause plausibility. The best expansion is selected per word.
 
-```powershell
-cargo run --features "report-cli,cuda,alignment-profiling" --bin alignment_report -- `
-  --dataset-root .\test-data `
-  --output-format textgrid `
-  --device cuda `
-  --perf-out .\target\perf\rust-perf.jsonl `
-  --perf-append `
-  --perf-warmup 10 `
-  --perf-repeats 30 `
-  --perf-aggregate median
-```
+### Confidence scoring
 
-### 5) Baseline comparative TextGrid files (upstream project)
+Each word receives a composite quality confidence score blending geometric mean emission probability, margin, p10 log-prob, and boundary evidence, passed through piecewise-linear calibration to produce a value in [0, 1].
 
-The batch script above is intended to generate **baseline comparative** `.TextGrid` files.
-You can use these files as a reference to compare your own alignment implementation.
+---
 
-To respect and credit the original authors, the upstream aligner project is maintained
-separately and should be treated as an external dependency:
+## License
 
-- Upstream project: [EveryVoiceTTS/wav2vec2aligner](https://github.com/EveryVoiceTTS/wav2vec2aligner)
-- Keep it as its own repository in your workspace (for example in `wav2vec2aligner-main/`)
-- Install it locally with `pip install -e wav2vec2aligner-main`
-
-If `wav2vec2aligner-main/` is not present yet, clone it first:
-
-```bash
-git clone https://github.com/EveryVoiceTTS/wav2vec2aligner wav2vec2aligner-main
-pip install -e wav2vec2aligner-main
-```
-
-```powershell
-git clone https://github.com/EveryVoiceTTS/wav2vec2aligner wav2vec2aligner-main
-pip install -e wav2vec2aligner-main
-```
-
-## Alignment Metrics Report (CLI)
-
-The threshold-based integration test is replaced by a deterministic report
-generator.
-
-The report command does **not** fail based on timing quality. It only fails on:
-
-- I/O or parsing failures
-- inference/runtime failures
-- invalid numeric metrics (NaN / Inf)
-
-### Build and run
-
-```bash
-cargo run --features report-cli --bin alignment_report -- --help
-```
-
-For CUDA runs with this binary, enable both `report-cli` and `cuda` features:
-
-```bash
-cargo run --features "report-cli,cuda" --bin alignment_report -- --help
-```
-
-Basic run (JSON report mode, default):
-
-```bash
-cargo run --features report-cli --bin alignment_report -- \
-  --dataset-root test-data \
-  --out target/alignment_reports/run.json
-```
-
-Run a filtered subset from a case-id file:
-
-```bash
-cargo run --features report-cli --bin alignment_report -- \
-  --cases-file current-failing-tests.txt \
-  --offset 0 \
-  --limit 200 \
-  --out target/alignment_reports/failing-cases.json
-```
-
-Generate TextGrid files instead of JSON (written next to each `.flac`):
-
-```bash
-cargo run --features "report-cli,cuda" --bin alignment_report -- \
-  --dataset-root test-data \
-  --output-format textgrid \
-  --textgrid-suffix _cmp \
-  --device cuda
-```
-
-### Required local files
-
-- Candle runtime: `models/wav2vec2-base-960h/model.safetensors`
-- ONNX runtime (`--features onnx`): `models/wav2vec2-base-960h/model.onnx`
-- `models/wav2vec2-base-960h/config.json`
-- `models/wav2vec2-base-960h/vocab.json`
-- `test-data/LibriSpeech/test-clean/**` and/or `test-data/LibriSpeech/test-other/**`
-- For `--output-format=json`: TextGrid + sibling FLAC files (the CLI scans for
-  `*.TextGrid` and uses matching `.flac`)
-- For `--output-format=textgrid`: transcript files (`*.trans.txt`) + sibling
-  FLAC files
-
-`alignment_report` runtime default:
-
-- with `--features onnx`: defaults to `--runtime onnx`
-- without `--features onnx`: defaults to `--runtime candle`
-
-### CLI options
-
-- `--model-dir <PATH>`: model directory (default: `models/wav2vec2-base-960h`)
-- `--dataset-root <PATH>`: dataset root (default: `test-data`)
-- `--cases-file <PATH>`: optional case list file
-- `--runtime <onnx|candle>`: inference runtime backend (default depends on enabled features)
-- `--output-format <json|textgrid>`: output mode (default: `json`)
-- `--textgrid-suffix <STRING>`: suffix appended before `.TextGrid` in textgrid
-  mode (default: empty)
-- `--out <PATH>`: output JSON path (default:
-  `target/alignment_reports/alignment-report-<timestamp>.json`; ignored in
-  `textgrid` mode
-- `--limit <N>`: max selected cases
-- `--offset <N>`: skip first N selected cases
-- `--device <cpu|cuda>`: runtime device (default: `cpu`)
-- `--perf-out <PATH>`: optional perf report path (JSON or JSONL with `--perf-append`). **Only available when built with `alignment-profiling` feature** (`cargo run --features "report-cli,alignment-profiling"`).
-- `--perf-warmup <N>`: warm-up iterations on first measured utterance only (default: `10`)
-- `--perf-repeats <N>`: measured repeats per utterance (default: `30`)
-- `--perf-aggregate <median|mean>`: repeat aggregation mode (default: `median`)
-- `--perf-append`: append JSONL records to `--perf-out` (also writes `<perf-out>.summary.json`)
-
-### Environment variables (optional)
-
-Each CLI option can be configured through an environment variable:
-
-- `WAV2VEC2_REPORT_MODEL_DIR` -> `--model-dir`
-- `WAV2VEC2_REPORT_DATASET_ROOT` -> `--dataset-root`
-- `WAV2VEC2_REPORT_CASES_FILE` -> `--cases-file`
-- `WAV2VEC2_REPORT_RUNTIME` -> `--runtime`
-- `WAV2VEC2_REPORT_FORMAT` -> `--output-format`
-- `WAV2VEC2_REPORT_TEXTGRID_SUFFIX` -> `--textgrid-suffix`
-- `WAV2VEC2_REPORT_OUT` -> `--out`
-- `WAV2VEC2_REPORT_LIMIT` -> `--limit`
-- `WAV2VEC2_REPORT_OFFSET` -> `--offset`
-- `WAV2VEC2_REPORT_DEVICE` -> `--device`
-- `WAV2VEC2_REPORT_PERF_OUT` -> `--perf-out`
-- `WAV2VEC2_REPORT_PERF_WARMUP` -> `--perf-warmup`
-- `WAV2VEC2_REPORT_PERF_REPEATS` -> `--perf-repeats`
-- `WAV2VEC2_REPORT_PERF_AGGREGATE` -> `--perf-aggregate`
-- `WAV2VEC2_REPORT_PERF_APPEND` -> `--perf-append`
-
-Command-line flags take precedence over environment variables.
-
-Example (Bash):
-
-```bash
-WAV2VEC2_REPORT_CASES_FILE=current-failing-tests.txt \
-WAV2VEC2_REPORT_DEVICE=cpu \
-cargo run --features report-cli --bin alignment_report -- --out target/alignment_reports/env-run.json
-```
-
-Example (PowerShell):
-
-```powershell
-$env:WAV2VEC2_REPORT_CASES_FILE = "current-failing-tests.txt"
-$env:WAV2VEC2_REPORT_DEVICE = "cpu"
-cargo run --features report-cli --bin alignment_report -- --out target/alignment_reports/env-run.json
-```
-
-### Case file format
-
-`--cases-file` accepts one ID per line (e.g. `1089-134686-0000`). It also
-tolerates:
-
-- lines prefixed like `L123:<id>`
-- test-name lines containing `::audio::<id>`
-- comments starting with `#`
-
-### Report output
-
-With `--output-format=json`, the generated JSON includes:
-
-- `schema_version = 1`
-- `meta` (`generated_at`, `model_path`, `device`, `frame_stride_ms`,
-  `case_count`)
-- `sentences[]` with per-utterance metrics and `split = clean|other|unknown`
-- `aggregates` with global/per-split distributions and deterministic outlier
-  ranking
-
-With `--output-format=textgrid`, the tool writes Praat TextGrid files next to
-each `.flac` file. The output name is `<audio_stem><suffix>.TextGrid`, where
-`suffix` comes from `--textgrid-suffix`.
+This project is licensed under the Mozilla Public License Version 2.0 — see the [LICENSE](https://www.mozilla.org/en-US/MPL/2.0/) file for details.
