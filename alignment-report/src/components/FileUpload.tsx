@@ -1,42 +1,38 @@
 import React, { useRef, useState } from 'react';
 import { useReports } from '../context/ReportContext';
-import { Report } from '../types/report';
+import { loadRunFromText } from '../lib/reportLoader';
 
 export function FileUpload() {
-  const { addReport } = useReports();
+  const { addRun } = useReports();
   const [dragging, setDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFile = async (file: File) => {
     try {
       const text = await file.text();
-      const data: Report = JSON.parse(text);
-
-      addReport({
-        id: crypto.randomUUID(),
-        filename: file.name,
-        data,
-        loadedAt: new Date(),
-      });
+      const run = loadRunFromText(text, file.name);
+      if (run) {
+        addRun(run);
+      } else {
+        alert('No valid performance records in file. Expected { records: [...] }, an array of records, or JSONL (one record per line).');
+      }
     } catch (error) {
-      console.error('Error parsing JSON:', error);
-      alert('Failed to parse JSON file');
+      console.error('Error parsing file:', error);
+      alert('Failed to parse file');
     }
   };
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragging(false);
-
-    const files = Array.from(e.dataTransfer.files);
+    const files = Array.from(e.dataTransfer.files).filter((f) => f.name.endsWith('.json') || f.type === 'application/json');
     files.forEach(handleFile);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
-    if (files) {
-      Array.from(files).forEach(handleFile);
-    }
+    if (files) Array.from(files).forEach(handleFile);
+    e.target.value = '';
   };
 
   return (
@@ -53,13 +49,11 @@ export function FileUpload() {
         onDragLeave={() => setDragging(false)}
         onClick={() => fileInputRef.current?.click()}
       >
-        <p className="text-gray-600">
-          Drop JSON files here or click to browse
-        </p>
+        <p className="text-gray-600">Drop performance run JSON files here or click to browse</p>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".json"
+          accept=".json,application/json"
           multiple
           onChange={handleFileInput}
           className="hidden"

@@ -1,0 +1,536 @@
+diff --git a/aligner/cli.py b/aligner/cli.py
+index 543ab52..8111740 100644
+--- a/aligner/cli.py
++++ b/aligner/cli.py
+@@ -1,3 +1,4 @@
++import json
+ import os
+ from pathlib import Path
+ 
+@@ -121,10 +122,28 @@ def align_single(
+         0, help="How many frames to pad around sentences (additive with word-padding)."
+     ),
+     debug: bool = typer.Option(False, help="Print debug statements"),
++    perf_out: Path = typer.Option(
++        None,
++        exists=False,
++        file_okay=True,
++        dir_okay=False,
++        path_type=Path,
++        help="If set, run benchmark mode and append one NDJSON record to this file.",
++    ),
++    warmup: int = typer.Option(0, help="Number of warmup runs before benchmark."),
++    repeats: int = typer.Option(1, help="Number of timed repeats for benchmark."),
++    aggregate: str = typer.Option(
++        "median",
++        help="Aggregate for benchmark: median, mean, min, max, p50, p90, p95, p99.",
++    ),
++    utterance_id: str = typer.Option(
++        None,
++        help="Utterance ID for perf record; defaults to audio_path.stem.",
++    ),
+ ):
+     # Do fast error checking before loading expensive dependencies
+     sentence_list = read_text(text_path)
+-    if not sentence_list or not any(sentence_list):
++    if not sentence_list or not any(sentence_list):                                                                                                                                                                                                                                                                                                       
+         raise typer.BadParameter(
+             f"TEXT_PATH file '{text_path}' is empty; it should contain sentences to align.",
+         )
+@@ -153,11 +172,33 @@ def align_single(
+     transducer = create_transducer("".join(sentence_list), labels, debug)
+     text_hash = TextHash(sentence_list, transducer)
+     print("performing alignment")
+-    from .heavy import align_speech_file
+-
+-    characters, words, sentences, num_frames = align_speech_file(
+-        wav, text_hash, model, labels, word_padding, sentence_padding
+-    )
++    from .heavy import align_speech_file, run_alignment_benchmark
++    from .perf_record import RustPerfRecord
++
++    if perf_out is not None:
++        uid = utterance_id if utterance_id is not None else audio_path.stem
++        perf_dict, characters, words, sentences, num_frames = run_alignment_benchmark(
++            wav,
++            text_hash,
++            model,
++            labels,
++            word_padding,
++            sentence_padding,
++            sample_rate=sample_rate,
++            utterance_id=uid,
++            audio_path=str(audio_path),
++            warmup=warmup,
++            repeats=repeats,
++            aggregate=aggregate,
++        )
++        record = RustPerfRecord.from_dict(perf_dict)
++        record.validate()
++        with open(perf_out, "a", encoding="utf-8") as f:
++            f.write(json.dumps(record.to_dict()) + "\n")
++    else:
++        characters, words, sentences, num_frames = align_speech_file(
++            wav, text_hash, model, labels, word_padding, sentence_padding
++        )
+     print("creating textgrid")
+     waveform_to_frame_ratio = wav.size(1) / num_frames
+     tg = create_text_grid_from_segments(
+diff --git a/aligner/heavy.py b/aligner/heavy.py
+index 7d597f8..0585a29 100644
+--- a/aligner/heavy.py
++++ b/aligner/heavy.py
+@@ -3,6 +3,9 @@ Utility functions that require expensive imports. Don't import from cli until ne
+ """
+ 
+ import re
++import statistics
++import time
++from typing import Any, Dict, List, Tuple
+ 
+ import torch
+ 
+@@ -14,9 +17,12 @@ from .classes import Frame, Segment
+ 
+ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+ 
++# WAV2VEC2_ASR_BASE_960H frame stride in ms
++FRAME_STRIDE_MS = 20.0
++
+ 
+ def load_model():
+-    bundle = torchaudio.pipelines.WAV2VEC2_ASR_LARGE_960H
++    bundle = torchaudio.pipelines.WAV2VEC2_ASR_BASE_960H
+     model = bundle.get_model()
+     labels = {l.lower(): i for i, l in enumerate(bundle.get_labels())}
+     del labels["-"]  # Remove blank token
+@@ -39,16 +45,207 @@ def align_speech_file(
+     return segments, words, sentences, emission.size(1)
+ 
+ 
++def align_speech_file_profiled(
++    audio, text_hash, model, labels_dictionary, word_padding, sentence_padding
++):
++    _maybe_cuda_sync(DEVICE)
++    total_started = time.perf_counter()
++    waveform = audio.to(DEVICE)
++
++    _maybe_cuda_sync(DEVICE)
++    forward_started = time.perf_counter()
++    logits = get_logits(model, waveform)
++    _maybe_cuda_sync(DEVICE)
++    forward_ms = (time.perf_counter() - forward_started) * 1000.0
++
++    _maybe_cuda_sync(DEVICE)
++    post_started = time.perf_counter()
++    emission = torch.log_softmax(logits, dim=-1)
++    _maybe_cuda_sync(DEVICE)
++    post_ms = (time.perf_counter() - post_started) * 1000.0
++
++    _maybe_cuda_sync(DEVICE)
++    align_started = time.perf_counter()
++    result = compute_alignments(
++        text_hash,
++        labels_dictionary,
++        emission,
++        word_padding=word_padding,
++        sentence_padding=sentence_padding,
++        return_timings=True,
++    )
++    segments, words, sentences, align_timings = result
++    _maybe_cuda_sync(DEVICE)
++    align_ms = (time.perf_counter() - align_started) * 1000.0
++
++    _maybe_cuda_sync(DEVICE)
++    total_ms = (time.perf_counter() - total_started) * 1000.0
++    num_frames_t = int(emission.size(1))
++    vocab_size = int(emission.size(-1))
++
++    return (
++        segments,
++        words,
++        sentences,
++        num_frames_t,
++        {
++            "forward_ms": forward_ms,
++            "post_ms": post_ms,
++            "dp_ms": align_timings["dp_ms"],
++            "group_ms": align_timings["group_ms"],
++            "conf_ms": align_timings["conf_ms"],
++            "align_ms": align_ms,
++            "total_ms": total_ms,
++            "num_frames_t": num_frames_t,
++            "vocab_size": vocab_size,
++            "dtype": str(emission.dtype).replace("torch.", ""),
++            "device": str(DEVICE),
++        },
++    )
++
++
++def _aggregate(values: List[float], aggregate: str) -> float:
++    """Compute aggregate over a list of values."""
++    if not values:
++        return 0.0
++    if aggregate == "median" or aggregate == "p50":
++        return statistics.median(values)
++    if aggregate == "mean":
++        return statistics.mean(values)
++    if aggregate == "min":
++        return min(values)
++    if aggregate == "max":
++        return max(values)
++    if aggregate == "p90":
++        return statistics.quantiles(values, n=10)[8]  # 90th percentile
++    if aggregate == "p95":
++        return statistics.quantiles(values, n=20)[18]  # 95th percentile
++    if aggregate == "p99":
++        return statistics.quantiles(values, n=100)[98]  # 99th percentile
++    raise ValueError(f"Unknown aggregate: {aggregate}")
++
++
++def run_alignment_benchmark(
++    audio: torch.Tensor,
++    text_hash,
++    model,
++    labels_dictionary: Dict[str, int],
++    word_padding: int,
++    sentence_padding: int,
++    sample_rate: int,
++    utterance_id: str,
++    audio_path: str,
++    warmup: int,
++    repeats: int,
++    aggregate: str,
++) -> Tuple[Dict[str, Any], List, List, List, int]:
++    """
++    Run alignment with warmup and repeats, return a dict matching RustPerfRecord.from_dict
++    and the last run's (segments, words, sentences, num_frames_t) for TextGrid creation.
++    """
++    # Warmup
++    for _ in range(warmup):
++        align_speech_file_profiled(
++            audio, text_hash, model, labels_dictionary, word_padding, sentence_padding
++        )
++
++    # Timed repeats
++    forward_ms_repeats: List[float] = []
++    post_ms_repeats: List[float] = []
++    dp_ms_repeats: List[float] = []
++    group_ms_repeats: List[float] = []
++    conf_ms_repeats: List[float] = []
++    align_ms_repeats: List[float] = []
++    total_ms_repeats: List[float] = []
++    last_segments = last_words = last_sentences = None
++    last_num_frames = 0
++
++    for _ in range(repeats):
++        segments, words, sentences, num_frames_t, timings = align_speech_file_profiled(
++            audio, text_hash, model, labels_dictionary, word_padding, sentence_padding
++        )
++        last_segments, last_words, last_sentences = segments, words, sentences
++        last_num_frames = num_frames_t
++        forward_ms_repeats.append(timings["forward_ms"])
++        post_ms_repeats.append(timings["post_ms"])
++        dp_ms_repeats.append(timings["dp_ms"])
++        group_ms_repeats.append(timings["group_ms"])
++        conf_ms_repeats.append(timings["conf_ms"])
++        align_ms_repeats.append(timings["align_ms"])
++        total_ms_repeats.append(timings["total_ms"])
++
++    num_frames_t = timings["num_frames_t"]
++    vocab_size = timings["vocab_size"]
++    state_len = vocab_size  # emission.size(-1)
++    ts_product = num_frames_t * state_len
++    duration_ms = int(1000.0 * audio.size(1) / sample_rate)
++    align_ms = _aggregate(align_ms_repeats, aggregate)
++
++    perf_dict = {
++        "utterance_id": utterance_id,
++        "audio_path": audio_path,
++        "duration_ms": duration_ms,
++        "num_frames_t": num_frames_t,
++        "state_len": state_len,
++        "ts_product": ts_product,
++        "vocab_size": vocab_size,
++        "dtype": timings["dtype"],
++        "device": timings["device"],
++        "frame_stride_ms": FRAME_STRIDE_MS,
++        "warmup": warmup,
++        "repeats": repeats,
++        "aggregate": aggregate,
++        "forward_ms": _aggregate(forward_ms_repeats, aggregate),
++        "post_ms": _aggregate(post_ms_repeats, aggregate),
++        "dp_ms": _aggregate(dp_ms_repeats, aggregate),
++        "group_ms": _aggregate(group_ms_repeats, aggregate),
++        "conf_ms": _aggregate(conf_ms_repeats, aggregate),
++        "align_ms": align_ms,
++        "total_ms": _aggregate(total_ms_repeats, aggregate),
++        "align_ms_per_ts": align_ms / ts_product,
++        "align_ms_per_t": align_ms / num_frames_t,
++        "forward_ms_repeats": forward_ms_repeats,
++        "post_ms_repeats": post_ms_repeats,
++        "dp_ms_repeats": dp_ms_repeats,
++        "group_ms_repeats": group_ms_repeats,
++        "conf_ms_repeats": conf_ms_repeats,
++        "align_ms_repeats": align_ms_repeats,
++        "total_ms_repeats": total_ms_repeats,
++    }
++    return (
++        perf_dict,
++        last_segments or [],
++        last_words or [],
++        last_sentences or [],
++        last_num_frames,
++    )
++
++
+ def get_emission(model, waveform):
++    logits = get_logits(model, waveform)
++    return torch.log_softmax(logits, dim=-1)
++
++
++def get_logits(model, waveform):
+     with torch.inference_mode():
+         # NOTE: this step is essential
+         waveform = torch.nn.functional.layer_norm(waveform, waveform.shape)
+-        emission, _ = model(waveform)
+-        return torch.log_softmax(emission, dim=-1)
++        logits, _ = model(waveform)
++        return logits
++
++
++def _maybe_cuda_sync(device):
++    if device.type == "cuda":
++        torch.cuda.synchronize(device)
+ 
+ 
+ def compute_alignments(
+-    transcript_hash, dictionary, emission, word_padding=0, sentence_padding=0
++    transcript_hash,
++    dictionary,
++    emission,
++    word_padding=0,
++    sentence_padding=0,
++    return_timings=False,
+ ):
+     all_words = [
+         v["text"].output_string for k, v in transcript_hash.items() if "w" in k
+@@ -59,13 +256,26 @@ def compute_alignments(
+     input_lengths = torch.tensor([emission.shape[1]], device=emission.device)
+     target_lengths = torch.tensor([targets.shape[1]], device=emission.device)
+ 
++    # dp: forced_align only
++    if return_timings:
++        _maybe_cuda_sync(emission.device)
++        dp_started = time.perf_counter()
+     alignment, scores = forced_align(
+         emission, targets, input_lengths, target_lengths, 0
+     )
++    if return_timings:
++        _maybe_cuda_sync(emission.device)
++        dp_ms = (time.perf_counter() - dp_started) * 1000.0
++        conf_started = time.perf_counter()
+ 
+     scores = scores.exp()  # convert back to probability
+     alignment, scores = alignment[0].tolist(), scores[0].tolist()
+ 
++    if return_timings:
++        _maybe_cuda_sync(emission.device)
++        conf_ms = (time.perf_counter() - conf_started) * 1000.0
++        group_started = time.perf_counter()
++
+     assert len(alignment) == len(scores) == emission.size(1)
+     token_index = -1
+     prev_hyp = 0
+@@ -152,6 +362,10 @@ def compute_alignments(
+                 end + sentence_padding,
+                 sum(scores) / len(scores),
+             )
++    if return_timings:
++        group_ms = (time.perf_counter() - group_started) * 1000.0
+     words = [v for k, v in transcript_hash.items() if "w" in k]
+     sentences = [v for k, v in transcript_hash.items() if "w" not in k]
++    if return_timings:
++        return segments, words, sentences, {"dp_ms": dp_ms, "group_ms": group_ms, "conf_ms": conf_ms}
+     return segments, words, sentences
+diff --git a/aligner/perf_record.py b/aligner/perf_record.py
+new file mode 100644
+index 0000000..b36de01
+--- /dev/null
++++ b/aligner/perf_record.py
+@@ -0,0 +1,175 @@
++"""
++RustPerfRecord schema for 1:1 performance comparison with Rust implementation.
++"""
++
++from __future__ import annotations
++
++import json
++from dataclasses import dataclass
++from typing import Any, Dict, List, Literal, Optional
++
++
++Aggregate = Literal["median", "mean", "min", "max", "p50", "p90", "p95", "p99"]
++DType = Literal["f16", "bf16", "f32", "f64"]
++Device = str  # e.g. "cuda", "cpu", "vulkan", "metal", ...
++
++
++@dataclass(slots=True)
++class RustPerfRecord:
++    # Identity / input
++    utterance_id: str
++    audio_path: str
++
++    # Audio/model shape
++    duration_ms: int
++    num_frames_t: int
++    state_len: int
++    ts_product: int
++    vocab_size: int
++    dtype: DType
++    device: Device
++    frame_stride_ms: float
++
++    # Benchmark configuration
++    warmup: int
++    repeats: int
++    aggregate: Aggregate
++
++    # Aggregated metrics (already aggregated according to `aggregate`)
++    forward_ms: float
++    post_ms: float
++    dp_ms: float
++    group_ms: float
++    conf_ms: float
++    align_ms: float
++    total_ms: float
++
++    # Derived metrics
++    align_ms_per_ts: float
++    align_ms_per_t: float
++
++    # Raw repeats (length == repeats)
++    forward_ms_repeats: List[float]
++    post_ms_repeats: List[float]
++    dp_ms_repeats: List[float]
++    group_ms_repeats: List[float]
++    conf_ms_repeats: List[float]
++    align_ms_repeats: List[float]
++    total_ms_repeats: List[float]
++
++    @staticmethod
++    def _require(obj: Dict[str, Any], key: str) -> Any:
++        if key not in obj:
++            raise KeyError(f"Missing key: {key}")
++        return obj[key]
++
++    @classmethod
++    def from_dict(cls, obj: Dict[str, Any]) -> "RustPerfRecord":
++        # Strict parsing: fails fast if a key is missing
++        return cls(
++            utterance_id=str(cls._require(obj, "utterance_id")),
++            audio_path=str(cls._require(obj, "audio_path")),
++            duration_ms=int(cls._require(obj, "duration_ms")),
++            num_frames_t=int(cls._require(obj, "num_frames_t")),
++            state_len=int(cls._require(obj, "state_len")),
++            ts_product=int(cls._require(obj, "ts_product")),
++            vocab_size=int(cls._require(obj, "vocab_size")),
++            dtype=str(cls._require(obj, "dtype")),  # type: ignore[arg-type]
++            device=str(cls._require(obj, "device")),
++            frame_stride_ms=float(cls._require(obj, "frame_stride_ms")),
++            warmup=int(cls._require(obj, "warmup")),
++            repeats=int(cls._require(obj, "repeats")),
++            aggregate=str(cls._require(obj, "aggregate")),  # type: ignore[arg-type]
++            forward_ms=float(cls._require(obj, "forward_ms")),
++            post_ms=float(cls._require(obj, "post_ms")),
++            dp_ms=float(cls._require(obj, "dp_ms")),
++            group_ms=float(cls._require(obj, "group_ms")),
++            conf_ms=float(cls._require(obj, "conf_ms")),
++            align_ms=float(cls._require(obj, "align_ms")),
++            total_ms=float(cls._require(obj, "total_ms")),
++            align_ms_per_ts=float(cls._require(obj, "align_ms_per_ts")),
++            align_ms_per_t=float(cls._require(obj, "align_ms_per_t")),
++            forward_ms_repeats=[float(x) for x in cls._require(obj, "forward_ms_repeats")],
++            post_ms_repeats=[float(x) for x in cls._require(obj, "post_ms_repeats")],
++            dp_ms_repeats=[float(x) for x in cls._require(obj, "dp_ms_repeats")],
++            group_ms_repeats=[float(x) for x in cls._require(obj, "group_ms_repeats")],
++            conf_ms_repeats=[float(x) for x in cls._require(obj, "conf_ms_repeats")],
++            align_ms_repeats=[float(x) for x in cls._require(obj, "align_ms_repeats")],
++            total_ms_repeats=[float(x) for x in cls._require(obj, "total_ms_repeats")],
++        )
++
++    def validate(self) -> None:
++        # Small sanity checks that match what your Rust exporter implies.
++        if self.repeats <= 0:
++            raise ValueError("repeats must be > 0")
++
++        for name in (
++            "forward_ms_repeats",
++            "post_ms_repeats",
++            "dp_ms_repeats",
++            "group_ms_repeats",
++            "conf_ms_repeats",
++            "align_ms_repeats",
++            "total_ms_repeats",
++        ):
++            arr = getattr(self, name)
++            if len(arr) != self.repeats:
++                raise ValueError(f"{name} length {len(arr)} != repeats {self.repeats}")
++
++        if self.num_frames_t <= 0 or self.state_len <= 0:
++            raise ValueError("num_frames_t and state_len must be > 0")
++
++        # Optional consistency check (cheap)
++        if self.ts_product != self.num_frames_t * self.state_len:
++            raise ValueError(
++                f"ts_product ({self.ts_product}) != num_frames_t*state_len "
++                f"({self.num_frames_t}*{self.state_len}={self.num_frames_t * self.state_len})"
++            )
++
++    def to_dict(self) -> Dict[str, Any]:
++        """Serialize to dict for NDJSON output."""
++        return {
++            "utterance_id": self.utterance_id,
++            "audio_path": self.audio_path,
++            "duration_ms": self.duration_ms,
++            "num_frames_t": self.num_frames_t,
++            "state_len": self.state_len,
++            "ts_product": self.ts_product,
++            "vocab_size": self.vocab_size,
++            "dtype": self.dtype,
++            "device": self.device,
++            "frame_stride_ms": self.frame_stride_ms,
++            "warmup": self.warmup,
++            "repeats": self.repeats,
++            "aggregate": self.aggregate,
++            "forward_ms": self.forward_ms,
++            "post_ms": self.post_ms,
++            "dp_ms": self.dp_ms,
++            "group_ms": self.group_ms,
++            "conf_ms": self.conf_ms,
++            "align_ms": self.align_ms,
++            "total_ms": self.total_ms,
++            "align_ms_per_ts": self.align_ms_per_ts,
++            "align_ms_per_t": self.align_ms_per_t,
++            "forward_ms_repeats": self.forward_ms_repeats,
++            "post_ms_repeats": self.post_ms_repeats,
++            "dp_ms_repeats": self.dp_ms_repeats,
++            "group_ms_repeats": self.group_ms_repeats,
++            "conf_ms_repeats": self.conf_ms_repeats,
++            "align_ms_repeats": self.align_ms_repeats,
++            "total_ms_repeats": self.total_ms_repeats,
++        }
++
++
++def load_rust_perf_ndjson(path: str) -> List[RustPerfRecord]:
++    records: List[RustPerfRecord] = []
++    with open(path, "r", encoding="utf-8") as f:
++        for i, line in enumerate(f, start=1):
++            line = line.strip()
++            if not line:
++                continue
++            obj = json.loads(line)
++            rec = RustPerfRecord.from_dict(obj)
++            rec.validate()
++            records.append(rec)
++    return records

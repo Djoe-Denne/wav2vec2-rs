@@ -3,6 +3,8 @@ pub struct AlignmentInput {
     pub sample_rate_hz: u32,
     pub samples: Vec<f32>,
     pub transcript: String,
+    /// Pre-normalized audio (mean 0, unit variance). When set, the pipeline skips normalization and uses this buffer for all iterations of the same input.
+    pub normalized: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

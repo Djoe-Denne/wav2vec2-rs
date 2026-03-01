@@ -81,6 +81,8 @@ fn get_gpu_context() -> Option<&'static GpuContext> {
                             bgl_entry(4, false),
                             // 5: out (read-write storage)
                             bgl_entry(5, false),
+                            // 6: path (read-write storage) — T u32s, GPU backtrack output
+                            bgl_entry(6, false),
                         ],
                     });
 
@@ -191,6 +193,14 @@ pub fn forced_align_viterbi_gpu(
     let buf_bp = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("bp"),
         size: bp_size,
+        usage: wgpu::BufferUsages::STORAGE,
+        mapped_at_creation: false,
+    });
+
+    let path_size = (t_len * 4) as u64; // T × u32
+    let buf_path = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("path"),
+        size: path_size,
         usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
         mapped_at_creation: false,
     });
@@ -206,21 +216,14 @@ pub fn forced_align_viterbi_gpu(
     let buf_out = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("out"),
         size: 8, // 2 × f32
-        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        usage: wgpu::BufferUsages::STORAGE,
         mapped_at_creation: false,
     });
 
-    // --- Staging buffers for readback ---
-    let staging_bp = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("staging-bp"),
-        size: bp_size,
-        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-        mapped_at_creation: false,
-    });
-
-    let staging_out = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("staging-out"),
-        size: 8,
+    // --- Staging buffer for readback: only path (T × 4 bytes), not bp (T×S × 4) ---
+    let staging_path = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("staging-path"),
+        size: path_size,
         usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
@@ -254,6 +257,10 @@ pub fn forced_align_viterbi_gpu(
                 binding: 5,
                 resource: buf_out.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: buf_path.as_entire_binding(),
+            },
         ],
     });
 
@@ -268,47 +275,18 @@ pub fn forced_align_viterbi_gpu(
         });
         pass.set_pipeline(&ctx.pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        pass.dispatch_workgroups(1, 1, 1); // single workgroup
+        pass.dispatch_workgroups(1, 1, 1); // single workgroup (forward + inline backtrack)
     }
-    encoder.copy_buffer_to_buffer(&buf_bp, 0, &staging_bp, 0, bp_size);
-    encoder.copy_buffer_to_buffer(&buf_out, 0, &staging_out, 0, 8);
+    encoder.copy_buffer_to_buffer(&buf_path, 0, &staging_path, 0, path_size);
     queue.submit(std::iter::once(encoder.finish()));
 
-    // --- Readback ---
-    let bp_data = read_buffer(device, &staging_bp, bp_size);
-    let out_data = read_buffer(device, &staging_out, 8);
+    // --- Readback only path (T × 4 bytes) ---
+    let path_data = read_buffer(device, &staging_path, path_size);
+    let path_u32: &[u32] = bytemuck::cast_slice(&path_data);
 
-    let bp_u32: &[u32] = bytemuck::cast_slice(&bp_data);
-    let out_f32: &[f32] = bytemuck::cast_slice(&out_data);
-
-    let score_last = out_f32[0];
-    let score_prev = out_f32[1];
-
-    // --- Backtrack on CPU (O(T), trivial) ---
-    let mut s = s_len - 1;
-    if s_len >= 2 && score_prev > score_last {
-        s = s_len - 2;
-    }
-
-    let mut path = Vec::with_capacity(t_len);
-    path.push((s, t_len - 1));
-    for t in (1..t_len).rev() {
-        let step = bp_u32[t * s_len + s];
-        s = match step {
-            0 => s,
-            1 => {
-                debug_assert!(s >= 1);
-                s - 1
-            }
-            2 => {
-                debug_assert!(s >= 2);
-                s - 2
-            }
-            _ => s,
-        };
-        path.push((s, t - 1));
-    }
-    path.reverse();
+    let path: Vec<(usize, usize)> = (0..t_len)
+        .map(|t| (path_u32[t] as usize, t))
+        .collect();
 
     Some(path)
 }

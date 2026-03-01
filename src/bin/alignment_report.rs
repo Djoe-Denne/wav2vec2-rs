@@ -16,10 +16,51 @@ use wav2vec2_rs::{
 
 #[path = "alignment_report/json_report_formatter.rs"]
 mod json_report_formatter;
+#[cfg(feature = "alignment-profiling")]
 #[path = "alignment_report/perf_report_formatter.rs"]
 mod perf_report_formatter;
+#[cfg(feature = "alignment-profiling")]
+use wav2vec2_rs::pipeline::memory_tracker::{MemoryTracker, StageMemoryMap};
 #[path = "alignment_report/text_grid_report_formatter.rs"]
 mod text_grid_report_formatter;
+
+#[cfg(feature = "alignment-profiling")]
+fn stage_memory_map_to_perf_memory(
+    m: &StageMemoryMap,
+) -> Option<perf_report_formatter::PerfMemory> {
+    use perf_report_formatter::GpuMemorySnapshot;
+    use wav2vec2_rs::pipeline::memory_tracker::StageMemory;
+    fn to_snapshot(s: &StageMemory) -> Option<GpuMemorySnapshot> {
+        if s.peak_gpu_allocated_bytes > 0 || s.gpu_total_bytes > 0 {
+            Some(GpuMemorySnapshot {
+                gpu_used: s.peak_gpu_allocated_bytes,
+                gpu_total: s.gpu_total_bytes,
+            })
+        } else {
+            None
+        }
+    }
+    let forward = to_snapshot(&m.forward);
+    let post = to_snapshot(&m.post);
+    let dp = to_snapshot(&m.dp);
+    let group = to_snapshot(&m.group);
+    let conf = to_snapshot(&m.conf);
+    if forward.is_none()
+        && post.is_none()
+        && dp.is_none()
+        && group.is_none()
+        && conf.is_none()
+    {
+        return None;
+    }
+    Some(perf_report_formatter::PerfMemory {
+        forward,
+        post,
+        dp,
+        group,
+        conf,
+    })
+}
 
 const LIBRISPEECH_SUBSETS: [&str; 2] = ["test-clean", "test-other"];
 const OUTLIER_TRACE_TOP_N: usize = 20;
@@ -29,14 +70,19 @@ enum OutputFormat {
     Json,
     #[value(name = "textgrid")]
     TextGrid,
+    /// Run alignment for performance measurement only; write perf JSON/JSONL but no report or TextGrid files.
+    #[value(name = "perf")]
+    Perf,
 }
 
+#[cfg(feature = "alignment-profiling")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum PerfAggregate {
     Median,
     Mean,
 }
 
+#[cfg(feature = "alignment-profiling")]
 impl PerfAggregate {
     fn as_str(self) -> &'static str {
         match self {
@@ -129,12 +175,16 @@ struct Args {
     output_format: OutputFormat,
     #[arg(long, env = "WAV2VEC2_REPORT_TEXTGRID_SUFFIX", default_value = "")]
     textgrid_suffix: String,
+    #[cfg(feature = "alignment-profiling")]
     #[arg(long, env = "WAV2VEC2_REPORT_PERF_OUT")]
     perf_out: Option<PathBuf>,
+    #[cfg(feature = "alignment-profiling")]
     #[arg(long, env = "WAV2VEC2_REPORT_PERF_WARMUP", default_value_t = 10)]
     perf_warmup: usize,
+    #[cfg(feature = "alignment-profiling")]
     #[arg(long, env = "WAV2VEC2_REPORT_PERF_REPEATS", default_value_t = 30)]
     perf_repeats: usize,
+    #[cfg(feature = "alignment-profiling")]
     #[arg(
         long,
         env = "WAV2VEC2_REPORT_PERF_AGGREGATE",
@@ -142,8 +192,10 @@ struct Args {
         default_value_t = PerfAggregate::Median
     )]
     perf_aggregate: PerfAggregate,
+    #[cfg(feature = "alignment-profiling")]
     #[arg(long, env = "WAV2VEC2_REPORT_PERF_APPEND", default_value_t = false)]
     perf_append: bool,
+    #[cfg(feature = "alignment-profiling")]
     #[arg(
         long,
         env = "WAV2VEC2_REPORT_PERF_SCALING_REPORT",
@@ -160,6 +212,7 @@ struct Case {
     reference_words: Vec<ReferenceWord>,
 }
 
+#[cfg(feature = "alignment-profiling")]
 #[derive(Debug, Clone)]
 struct ScalingSample {
     utterance_id: String,
@@ -183,24 +236,30 @@ fn run() -> Result<(), String> {
 
     let model_dir = resolve_path(&repo_root, &args.model_dir);
     let dataset_root = resolve_path(&repo_root, &args.dataset_root);
+    #[cfg(feature = "alignment-profiling")]
     if args.perf_repeats == 0 {
         return Err("--perf-repeats must be >= 1.".to_string());
     }
     let out_path = match args.output_format {
         OutputFormat::Json => Some(resolve_out_path(&repo_root, args.out.as_ref())),
-        OutputFormat::TextGrid => {
-            None
-        }
+        OutputFormat::TextGrid | OutputFormat::Perf => None,
     };
+    #[cfg(feature = "alignment-profiling")]
     let perf_out_path = args
         .perf_out
         .as_ref()
         .map(|path| resolve_path(&repo_root, path));
+    #[cfg(not(feature = "alignment-profiling"))]
+    let perf_out_path: Option<PathBuf> = None;
+    #[cfg(feature = "alignment-profiling")]
+    if args.output_format == OutputFormat::Perf && perf_out_path.is_none() {
+        return Err("--output-format perf requires --perf-out.".to_string());
+    }
 
     let include_ids = load_case_filter(args.cases_file.as_ref(), &repo_root)?;
     let mut cases = match args.output_format {
         OutputFormat::Json => load_all_cases(&dataset_root)?,
-        OutputFormat::TextGrid => load_all_cases_from_transcripts(&dataset_root)?,
+        OutputFormat::TextGrid | OutputFormat::Perf => load_all_cases_from_transcripts(&dataset_root)?,
     };
 
     if let Some(ids) = include_ids.as_ref() {
@@ -247,12 +306,14 @@ fn run() -> Result<(), String> {
     let mut written_textgrids = 0usize;
     let mut lib_work_elapsed = Duration::ZERO;
     let perf_enabled = perf_out_path.is_some();
+    #[cfg(feature = "alignment-profiling")]
     let perf_config = perf_report_formatter::PerfRunConfig {
         warmup: args.perf_warmup,
         repeats: args.perf_repeats,
         aggregate: args.perf_aggregate.as_str().to_string(),
         append: args.perf_append,
     };
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_jsonl_appender = if perf_enabled && args.perf_append {
         let perf_path = perf_out_path
             .as_ref()
@@ -261,21 +322,39 @@ fn run() -> Result<(), String> {
     } else {
         None
     };
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_records = if perf_enabled && !args.perf_append {
         Vec::with_capacity(cases.len())
     } else {
         Vec::new()
     };
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_forward_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_post_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_dp_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_group_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_conf_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_align_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_align_per_ts_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_align_per_t_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_total_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
+    let mut perf_forward_gpu_used_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
+    let mut perf_dp_gpu_used_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
+    let mut perf_gpu_total: Option<u64> = None;
+    #[cfg(feature = "alignment-profiling")]
     let mut scaling_samples = Vec::new();
+    #[cfg(feature = "alignment-profiling")]
     let mut perf_warmup_done = false;
     let progress = ProgressBar::new(cases.len() as u64);
     progress.set_style(
@@ -302,142 +381,190 @@ fn run() -> Result<(), String> {
             ((samples.len() as u128) * 1000 / sample_rate_hz as u128) as u64
         };
 
+        let normalized = if perf_enabled {
+            #[cfg(feature = "alignment-profiling")]
+            {
+                Some(wav2vec2_rs::normalize_audio(&samples))
+            }
+            #[cfg(not(feature = "alignment-profiling"))]
+            {
+                None
+            }
+        } else {
+            None
+        };
         let alignment_input = AlignmentInput {
             sample_rate_hz,
             samples,
             transcript: case.transcript.clone(),
+            normalized,
         };
         let output_words = if perf_enabled {
-            if !perf_warmup_done {
-                for _ in 0..args.perf_warmup {
-                    aligner
-                        .align_profiled(&alignment_input)
-                        .map_err(|err| format!("{}: warm-up align() failed: {err}", case.id))?;
+            #[cfg(feature = "alignment-profiling")]
+            {
+                if !perf_warmup_done {
+                    for _ in 0..args.perf_warmup {
+                        aligner
+                            .align_profiled(&alignment_input)
+                            .map_err(|err| format!("{}: warm-up align() failed: {err}", case.id))?;
+                    }
+                    perf_warmup_done = true;
                 }
-                perf_warmup_done = true;
-            }
 
-            let mut forward_ms_repeats = Vec::with_capacity(args.perf_repeats);
-            let mut post_ms_repeats = Vec::with_capacity(args.perf_repeats);
-            let mut dp_ms_repeats = Vec::with_capacity(args.perf_repeats);
-            let mut group_ms_repeats = Vec::with_capacity(args.perf_repeats);
-            let mut conf_ms_repeats = Vec::with_capacity(args.perf_repeats);
-            let mut align_ms_repeats = Vec::with_capacity(args.perf_repeats);
-            let mut total_ms_repeats = Vec::with_capacity(args.perf_repeats);
-            let mut selected_words: Option<Vec<WordTiming>> = None;
-            let mut selected_num_frames_t = 0usize;
-            let mut selected_state_len = 0usize;
-            let mut selected_ts_product = 0u64;
-            let mut selected_vocab_size = 0usize;
-            let mut selected_dtype = String::new();
-            let mut selected_device = String::new();
+                let mut forward_ms_repeats = Vec::with_capacity(args.perf_repeats);
+                let mut post_ms_repeats = Vec::with_capacity(args.perf_repeats);
+                let mut dp_ms_repeats = Vec::with_capacity(args.perf_repeats);
+                let mut group_ms_repeats = Vec::with_capacity(args.perf_repeats);
+                let mut conf_ms_repeats = Vec::with_capacity(args.perf_repeats);
+                let mut align_ms_repeats = Vec::with_capacity(args.perf_repeats);
+                let mut total_ms_repeats = Vec::with_capacity(args.perf_repeats);
+                let mut selected_words: Option<Vec<WordTiming>> = None;
+                let mut selected_num_frames_t = 0usize;
+                let mut selected_state_len = 0usize;
+                let mut selected_ts_product = 0u64;
+                let mut selected_vocab_size = 0usize;
+                let mut selected_dtype = String::new();
+                let mut selected_device = String::new();
+                let mut process_memory: Option<StageMemoryMap> = None;
+                // Use GPU memory probe for both cuda and generic-gpu (ORT CUDA EP loads libcudart).
+                let gpu_reader = if args.device.eq_ignore_ascii_case("cpu") {
+                    None
+                } else {
+                    wav2vec2_rs::pipeline::memory_tracker::cuda_gpu_reader()
+                };
+                let mut tracker = MemoryTracker::new(gpu_reader);
 
-            for repeat_idx in 0..args.perf_repeats {
-                let profiled = aligner
-                    .align_profiled(&alignment_input)
-                    .map_err(|err| format!("{}: perf align() failed: {err}", case.id))?;
-                let timings = profiled.timings;
-                forward_ms_repeats.push(timings.forward_ms);
-                post_ms_repeats.push(timings.post_ms);
-                dp_ms_repeats.push(timings.dp_ms);
-                group_ms_repeats.push(timings.group_ms);
-                conf_ms_repeats.push(timings.conf_ms);
-                align_ms_repeats.push(timings.align_ms);
-                total_ms_repeats.push(timings.total_ms);
+                for repeat_idx in 0..args.perf_repeats {
+                    let profiled = if repeat_idx == 0 {
+                        let (prof, mem) = aligner
+                            .align_profiled_with_memory(&alignment_input, &mut tracker)
+                            .map_err(|err| format!("{}: perf align_with_memory() failed: {err}", case.id))?;
+                        process_memory = Some(mem);
+                        prof
+                    } else {
+                        aligner
+                            .align_profiled(&alignment_input)
+                            .map_err(|err| format!("{}: perf align() failed: {err}", case.id))?
+                    };
+                    let timings = profiled.timings;
+                    forward_ms_repeats.push(timings.forward_ms);
+                    post_ms_repeats.push(timings.post_ms);
+                    dp_ms_repeats.push(timings.dp_ms);
+                    group_ms_repeats.push(timings.group_ms);
+                    conf_ms_repeats.push(timings.conf_ms);
+                    align_ms_repeats.push(timings.align_ms);
+                    total_ms_repeats.push(timings.total_ms);
 
-                if repeat_idx == 0 {
-                    selected_words = Some(profiled.output.words);
-                    selected_num_frames_t = profiled.num_frames_t;
-                    selected_state_len = profiled.state_len;
-                    selected_ts_product = profiled.ts_product;
-                    selected_vocab_size = profiled.vocab_size;
-                    selected_dtype = profiled.dtype;
-                    selected_device = profiled.device;
+                    if repeat_idx == 0 {
+                        selected_words = Some(profiled.output.words);
+                        selected_num_frames_t = profiled.num_frames_t;
+                        selected_state_len = profiled.state_len;
+                        selected_ts_product = profiled.ts_product;
+                        selected_vocab_size = profiled.vocab_size;
+                        selected_dtype = profiled.dtype;
+                        selected_device = profiled.device;
+                    }
                 }
+
+                let forward_ms = aggregate_measurements(&forward_ms_repeats, args.perf_aggregate);
+                let post_ms = aggregate_measurements(&post_ms_repeats, args.perf_aggregate);
+                let dp_ms = aggregate_measurements(&dp_ms_repeats, args.perf_aggregate);
+                let group_ms = aggregate_measurements(&group_ms_repeats, args.perf_aggregate);
+                let conf_ms = aggregate_measurements(&conf_ms_repeats, args.perf_aggregate);
+                // Keep record-level substage timings internally consistent even when
+                // the selected aggregate is median (median(a+b) != median(a)+median(b)).
+                let align_ms = dp_ms + group_ms + conf_ms;
+                let total_ms = aggregate_measurements(&total_ms_repeats, args.perf_aggregate);
+                let align_ms_per_ts = if selected_ts_product > 0 {
+                    align_ms / selected_ts_product as f64
+                } else {
+                    0.0
+                };
+                let align_ms_per_t = if selected_num_frames_t > 0 {
+                    align_ms / selected_num_frames_t as f64
+                } else {
+                    0.0
+                };
+
+                let record = perf_report_formatter::PerfUtteranceRecord {
+                    utterance_id: case.id.clone(),
+                    audio_path: case.audio_path.clone(),
+                    duration_ms,
+                    num_frames_t: selected_num_frames_t,
+                    state_len: selected_state_len,
+                    ts_product: selected_ts_product,
+                    vocab_size: selected_vocab_size,
+                    dtype: selected_dtype,
+                    device: selected_device,
+                    frame_stride_ms,
+                    warmup: args.perf_warmup,
+                    repeats: args.perf_repeats,
+                    aggregate: args.perf_aggregate.as_str().to_string(),
+                    forward_ms,
+                    post_ms,
+                    dp_ms,
+                    group_ms,
+                    conf_ms,
+                    align_ms,
+                    align_ms_per_ts,
+                    align_ms_per_t,
+                    total_ms,
+                    forward_ms_repeats,
+                    post_ms_repeats,
+                    dp_ms_repeats,
+                    group_ms_repeats,
+                    conf_ms_repeats,
+                    align_ms_repeats,
+                    total_ms_repeats,
+                    memory: process_memory.as_ref().and_then(stage_memory_map_to_perf_memory),
+                };
+
+                perf_forward_samples.push(record.forward_ms);
+                perf_post_samples.push(record.post_ms);
+                perf_dp_samples.push(record.dp_ms);
+                perf_group_samples.push(record.group_ms);
+                perf_conf_samples.push(record.conf_ms);
+                perf_align_samples.push(record.align_ms);
+                perf_align_per_ts_samples.push(record.align_ms_per_ts);
+                perf_align_per_t_samples.push(record.align_ms_per_t);
+                perf_total_samples.push(record.total_ms);
+                if let Some(ref mem) = record.memory {
+                    if let Some(ref f) = mem.forward {
+                        perf_forward_gpu_used_samples.push(f.gpu_used as f64);
+                        if perf_gpu_total.is_none() {
+                            perf_gpu_total = Some(f.gpu_total);
+                        }
+                    }
+                    if let Some(ref d) = mem.dp {
+                        perf_dp_gpu_used_samples.push(d.gpu_used as f64);
+                    }
+                }
+                scaling_samples.push(ScalingSample {
+                    utterance_id: record.utterance_id.clone(),
+                    num_frames_t: record.num_frames_t,
+                    state_len: record.state_len,
+                    ts_product: record.ts_product,
+                    dp_ms: record.dp_ms,
+                    group_ms: record.group_ms,
+                    conf_ms: record.conf_ms,
+                });
+                lib_work_elapsed += Duration::from_secs_f64(record.total_ms / 1000.0);
+
+                if args.perf_append {
+                    let appender = perf_jsonl_appender
+                        .as_mut()
+                        .ok_or_else(|| "internal error: missing perf JSONL appender".to_string())?;
+                    appender.append(&record)?;
+                } else {
+                    perf_records.push(record);
+                }
+
+                selected_words.ok_or_else(|| format!("{}: missing profiled output words", case.id))?
             }
-
-            let forward_ms = aggregate_measurements(&forward_ms_repeats, args.perf_aggregate);
-            let post_ms = aggregate_measurements(&post_ms_repeats, args.perf_aggregate);
-            let dp_ms = aggregate_measurements(&dp_ms_repeats, args.perf_aggregate);
-            let group_ms = aggregate_measurements(&group_ms_repeats, args.perf_aggregate);
-            let conf_ms = aggregate_measurements(&conf_ms_repeats, args.perf_aggregate);
-            // Keep record-level substage timings internally consistent even when
-            // the selected aggregate is median (median(a+b) != median(a)+median(b)).
-            let align_ms = dp_ms + group_ms + conf_ms;
-            let total_ms = aggregate_measurements(&total_ms_repeats, args.perf_aggregate);
-            let align_ms_per_ts = if selected_ts_product > 0 {
-                align_ms / selected_ts_product as f64
-            } else {
-                0.0
-            };
-            let align_ms_per_t = if selected_num_frames_t > 0 {
-                align_ms / selected_num_frames_t as f64
-            } else {
-                0.0
-            };
-
-            let record = perf_report_formatter::PerfUtteranceRecord {
-                utterance_id: case.id.clone(),
-                audio_path: case.audio_path.clone(),
-                duration_ms,
-                num_frames_t: selected_num_frames_t,
-                state_len: selected_state_len,
-                ts_product: selected_ts_product,
-                vocab_size: selected_vocab_size,
-                dtype: selected_dtype,
-                device: selected_device,
-                frame_stride_ms,
-                warmup: args.perf_warmup,
-                repeats: args.perf_repeats,
-                aggregate: args.perf_aggregate.as_str().to_string(),
-                forward_ms,
-                post_ms,
-                dp_ms,
-                group_ms,
-                conf_ms,
-                align_ms,
-                align_ms_per_ts,
-                align_ms_per_t,
-                total_ms,
-                forward_ms_repeats,
-                post_ms_repeats,
-                dp_ms_repeats,
-                group_ms_repeats,
-                conf_ms_repeats,
-                align_ms_repeats,
-                total_ms_repeats,
-            };
-
-            perf_forward_samples.push(record.forward_ms);
-            perf_post_samples.push(record.post_ms);
-            perf_dp_samples.push(record.dp_ms);
-            perf_group_samples.push(record.group_ms);
-            perf_conf_samples.push(record.conf_ms);
-            perf_align_samples.push(record.align_ms);
-            perf_align_per_ts_samples.push(record.align_ms_per_ts);
-            perf_align_per_t_samples.push(record.align_ms_per_t);
-            perf_total_samples.push(record.total_ms);
-            scaling_samples.push(ScalingSample {
-                utterance_id: record.utterance_id.clone(),
-                num_frames_t: record.num_frames_t,
-                state_len: record.state_len,
-                ts_product: record.ts_product,
-                dp_ms: record.dp_ms,
-                group_ms: record.group_ms,
-                conf_ms: record.conf_ms,
-            });
-            lib_work_elapsed += Duration::from_secs_f64(record.total_ms / 1000.0);
-
-            if args.perf_append {
-                let appender = perf_jsonl_appender
-                    .as_mut()
-                    .ok_or_else(|| "internal error: missing perf JSONL appender".to_string())?;
-                appender.append(&record)?;
-            } else {
-                perf_records.push(record);
+            #[cfg(not(feature = "alignment-profiling"))]
+            {
+                unreachable!("perf_enabled is only true when alignment-profiling feature is enabled")
             }
-
-            selected_words.ok_or_else(|| format!("{}: missing profiled output words", case.id))?
         } else {
             let lib_started = Instant::now();
             let output = aligner
@@ -474,6 +601,7 @@ fn run() -> Result<(), String> {
                 )?;
                 written_textgrids += 1;
             }
+            OutputFormat::Perf => {}
         }
         progress.inc(1);
     }
@@ -533,8 +661,10 @@ fn run() -> Result<(), String> {
                 );
             }
         }
+        OutputFormat::Perf => {}
     }
 
+    #[cfg(feature = "alignment-profiling")]
     if let Some(perf_path) = perf_out_path.as_ref() {
         let aggregate = perf_report_formatter::PerfAggregateStats {
             utterance_count: perf_total_samples.len(),
@@ -547,6 +677,11 @@ fn run() -> Result<(), String> {
             align_ms_per_ts: summarize_metric(&perf_align_per_ts_samples),
             align_ms_per_t: summarize_metric(&perf_align_per_t_samples),
             total_ms: summarize_metric(&perf_total_samples),
+            memory: perf_gpu_total.map(|gpu_total| perf_report_formatter::PerfAggregateMemory {
+                forward_gpu_used: summarize_metric(&perf_forward_gpu_used_samples),
+                dp_gpu_used: summarize_metric(&perf_dp_gpu_used_samples),
+                gpu_total,
+            }),
         };
         if args.perf_append {
             if let Some(appender) = perf_jsonl_appender.take() {
@@ -1122,6 +1257,7 @@ fn resolve_path(repo_root: &Path, path: &Path) -> PathBuf {
     }
 }
 
+#[cfg(feature = "alignment-profiling")]
 fn aggregate_measurements(values: &[f64], mode: PerfAggregate) -> f64 {
     match mode {
         PerfAggregate::Median => median(values),
@@ -1129,6 +1265,7 @@ fn aggregate_measurements(values: &[f64], mode: PerfAggregate) -> f64 {
     }
 }
 
+#[cfg(feature = "alignment-profiling")]
 fn summarize_metric(values: &[f64]) -> perf_report_formatter::PerfMetricStats {
     if values.is_empty() {
         return perf_report_formatter::PerfMetricStats {
@@ -1156,6 +1293,7 @@ fn summarize_metric(values: &[f64]) -> perf_report_formatter::PerfMetricStats {
     }
 }
 
+#[cfg(feature = "alignment-profiling")]
 fn mean(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -1163,6 +1301,7 @@ fn mean(values: &[f64]) -> f64 {
     values.iter().sum::<f64>() / values.len() as f64
 }
 
+#[cfg(feature = "alignment-profiling")]
 fn median(values: &[f64]) -> f64 {
     if values.is_empty() {
         return 0.0;
@@ -1177,6 +1316,7 @@ fn median(values: &[f64]) -> f64 {
     }
 }
 
+#[cfg(feature = "alignment-profiling")]
 fn print_scaling_report(samples: &[ScalingSample]) {
     println!("perf_scaling_report:");
     if samples.is_empty() {
@@ -1236,6 +1376,7 @@ fn print_scaling_report(samples: &[ScalingSample]) {
     }
 }
 
+#[cfg(feature = "alignment-profiling")]
 fn pearson_correlation(xs: &[f64], ys: &[f64]) -> f64 {
     if xs.len() != ys.len() || xs.len() < 2 {
         return 0.0;

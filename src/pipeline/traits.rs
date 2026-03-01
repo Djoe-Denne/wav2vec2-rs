@@ -3,6 +3,49 @@ use std::collections::HashMap;
 use crate::error::AlignmentError;
 use crate::types::{TokenSequence, WordTiming};
 
+/// Output from the forward pass — either on host or still on GPU.
+///
+/// Used to support zero-copy CUDA Viterbi: when log_probs stay on device,
+/// we avoid the post_ms GPU→CPU copy and run Viterbi directly on GPU.
+#[derive(Debug)]
+pub enum ForwardOutput {
+    /// Log probs on host: [T][V] — used by CPU/wgpu Viterbi.
+    Host(RuntimeInferenceOutput),
+
+    /// Log probs still on CUDA device — used by cuda-dp zero-copy.
+    #[cfg(feature = "cuda-dp")]
+    CudaDevice(crate::pipeline::cuda_forward::CudaLogProbsBuffer),
+}
+
+impl ForwardOutput {
+    /// Returns (num_frames_t, vocab_size, dtype) for validation and profiling.
+    pub fn metadata(&self) -> (usize, usize, String) {
+        match self {
+            ForwardOutput::Host(o) => (o.num_frames_t, o.vocab_size, o.dtype.clone()),
+            #[cfg(feature = "cuda-dp")]
+            ForwardOutput::CudaDevice(buf) => (buf.t_len, buf.v_len, "f32".to_string()),
+        }
+    }
+
+    /// Obtain host log_probs for grouping. For Host, returns immediately.
+    /// For CudaDevice, copies from GPU and applies log_softmax if needed.
+    pub fn to_runtime_inference_output(self) -> Result<RuntimeInferenceOutput, AlignmentError> {
+        match self {
+            ForwardOutput::Host(o) => Ok(o),
+            #[cfg(feature = "cuda-dp")]
+            ForwardOutput::CudaDevice(buf) => buf.to_runtime_inference_output(),
+        }
+    }
+}
+
+/// Profiled forward output with timing.
+#[derive(Debug)]
+pub struct ProfiledForwardOutput {
+    pub forward_output: ForwardOutput,
+    pub forward_ms: f64,
+    pub post_ms: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RuntimeKind {
     #[default]
@@ -26,15 +69,15 @@ pub struct ProfiledRuntimeInferenceOutput {
 }
 
 pub trait RuntimeBackend: Send + Sync {
-    fn infer(&self, normalized_audio: &[f32]) -> Result<RuntimeInferenceOutput, AlignmentError>;
+    fn infer(&self, normalized_audio: &[f32]) -> Result<ForwardOutput, AlignmentError>;
 
     fn infer_profiled(
         &self,
         normalized_audio: &[f32],
-    ) -> Result<ProfiledRuntimeInferenceOutput, AlignmentError> {
-        let output = self.infer(normalized_audio)?;
-        Ok(ProfiledRuntimeInferenceOutput {
-            output,
+    ) -> Result<ProfiledForwardOutput, AlignmentError> {
+        let forward_output = self.infer(normalized_audio)?;
+        Ok(ProfiledForwardOutput {
+            forward_output,
             forward_ms: 0.0,
             post_ms: 0.0,
         })

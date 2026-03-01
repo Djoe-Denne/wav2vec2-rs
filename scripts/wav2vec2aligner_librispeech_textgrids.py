@@ -222,6 +222,31 @@ def maybe_sync_cuda(device) -> None:
         torch.cuda.synchronize(device)
 
 
+def process_level_memory_for_dashboard(device) -> dict | None:
+    """Return process-level GPU memory in dashboard format {gpu_used, gpu_total, gpu_allocated?}.
+    Uses cudaMemGetInfo (torch.cuda.mem_get_info) for gpu_used/gpu_total so Python and Rust
+    are comparable. Also reports torch.cuda.memory_allocated() as gpu_allocated for reference."""
+    if getattr(device, "type", None) != "cuda":
+        return None
+    import torch
+    try:
+        # Device-level: same as Rust cudaMemGetInfo (total - free, total).
+        if hasattr(torch.cuda, "mem_get_info"):
+            free_b, total_b = torch.cuda.mem_get_info(device)
+            gpu_used = total_b - free_b
+            gpu_total = total_b
+        else:
+            props = torch.cuda.get_device_properties(device)
+            gpu_total = props.total_memory
+            gpu_used = gpu_total  # fallback when mem_get_info not available
+        out = {"gpu_used": gpu_used, "gpu_total": gpu_total}
+        # PyTorch allocated tensors only (not comparable to Rust; for side-by-side comparison).
+        out["gpu_allocated"] = torch.cuda.memory_allocated(device)
+        return out
+    except Exception:
+        return None
+
+
 def write_perf_json_report(
     path: Path,
     config: dict[str, object],
@@ -274,7 +299,11 @@ def main() -> int:
     ensure_aligner_importable()
 
     import aligner.heavy as heavy
-    from aligner.heavy import align_speech_file, align_speech_file_profiled, load_model
+    from aligner.heavy import (
+        align_speech_file,
+        align_speech_file_profiled,
+        load_model,
+    )
     from aligner.utils import TextHash, create_text_grid_from_segments, create_transducer
 
     dataset_root = args.dataset_root
@@ -304,6 +333,8 @@ def main() -> int:
     perf_post_samples: list[float] = []
     perf_align_samples: list[float] = []
     perf_total_samples: list[float] = []
+    perf_gpu_used_samples: list[float] = []
+    perf_gpu_total: int | None = None
     perf_jsonl_handle: TextIO | None = None
     perf_jsonl_since_flush = 0
     perf_warmup_done = False
@@ -428,6 +459,9 @@ def main() -> int:
                     total_ms = aggregate_measurements(total_ms_repeats, args.perf_aggregate)
                     lib_work_elapsed_s += total_ms / 1000.0
 
+                    maybe_sync_cuda(device)
+                    memory_result = process_level_memory_for_dashboard(device)
+
                     duration_ms = (
                         int((wav.size(1) * 1000) / args.sample_rate)
                         if args.sample_rate > 0
@@ -438,6 +472,10 @@ def main() -> int:
                         if num_frames > 0 and args.sample_rate > 0
                         else 0.0
                     )
+                    if memory_result is not None:
+                        perf_gpu_used_samples.append(float(memory_result["gpu_used"]))
+                        if perf_gpu_total is None:
+                            perf_gpu_total = int(memory_result["gpu_total"])
                     perf_record = {
                         "utterance_id": utt_id,
                         "audio_path": str(audio_path),
@@ -458,6 +496,7 @@ def main() -> int:
                         "post_ms_repeats": post_ms_repeats,
                         "align_ms_repeats": align_ms_repeats,
                         "total_ms_repeats": total_ms_repeats,
+                        "memory": memory_result,
                     }
                     perf_forward_samples.append(forward_ms)
                     perf_post_samples.append(post_ms)
@@ -548,6 +587,11 @@ def main() -> int:
             "align_ms": summarize_metric(perf_align_samples),
             "total_ms": summarize_metric(perf_total_samples),
         }
+        if perf_gpu_total is not None:
+            aggregate["memory"] = {
+                "gpu_used": summarize_metric(perf_gpu_used_samples),
+                "gpu_total": perf_gpu_total,
+            }
         if args.perf_append:
             if perf_jsonl_handle is not None:
                 perf_jsonl_handle.flush()

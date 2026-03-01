@@ -26,36 +26,18 @@ pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(us
             }
             tracing::debug!("wgpu Viterbi unavailable, falling back to CPU");
         }
+        #[cfg(feature = "cuda-dp")]	
+        {
+            if let Some(path) = cuda::forced_align_viterbi_cuda(log_probs, tokens) {
+                return path;
+            }
+            tracing::debug!("cuda Viterbi unavailable, falling back to CPU");
+        }
     }
 
     forced_align_viterbi_cpu(log_probs, tokens)
 }
 
-/// Zero-copy variant: skips post_ms entirely.
-///
-/// Called from the pipeline when ORT runs on CUDA and we have
-/// the device pointer to the log_probs tensor.
-///
-/// Falls through: cuda-dp → gpu-dp (with host copy) → cpu
-///
-/// # Safety
-/// `log_probs_dev_ptr` must be a valid CUDA device pointer.
-#[cfg(feature = "cuda-dp")]
-pub unsafe fn forced_align_viterbi_zerocopy(
-    log_probs_dev_ptr: *const f32,
-    t_len: usize,
-    v_len: usize,
-    tokens: &[usize],
-) -> Vec<(usize, usize)> {
-    if let Some(path) = cuda::forced_align_viterbi_cuda_zerocopy(
-        log_probs_dev_ptr, t_len, v_len, tokens,
-    ) {
-        return path;
-    }
-    tracing::warn!("CUDA Viterbi failed, cannot use zero-copy path");
-    // Can't fall back without host data — return empty and let caller handle
-    Vec::new()
-}
 
 /// CPU-only CTC Viterbi (always available).
 pub fn forced_align_viterbi_cpu(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(usize, usize)> {

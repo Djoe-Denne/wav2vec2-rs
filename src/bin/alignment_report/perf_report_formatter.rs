@@ -6,7 +6,26 @@ use chrono::Utc;
 use serde::Serialize;
 
 const PERF_SCHEMA_VERSION: u32 = 1;
-const JSONL_FLUSH_EVERY: usize = 32;
+const JSONL_FLUSH_EVERY: usize = 262144;
+/// BufWriter capacity so one record (~1–2 KB) doesn't fill the buffer and trigger implicit flushes.
+const JSONL_BUFFER_CAPACITY: usize = 2 * 1024 * 1024;
+
+/// GPU memory snapshot at a point in time (used and total device memory in bytes).
+#[derive(Debug, Clone, Serialize)]
+pub struct GpuMemorySnapshot {
+    pub gpu_used: u64,
+    pub gpu_total: u64,
+}
+
+/// Per-stage GPU memory for one run; matches Python reference shape.
+#[derive(Debug, Clone, Serialize)]
+pub struct PerfMemory {
+    pub forward: Option<GpuMemorySnapshot>,
+    pub post: Option<GpuMemorySnapshot>,
+    pub dp: Option<GpuMemorySnapshot>,
+    pub group: Option<GpuMemorySnapshot>,
+    pub conf: Option<GpuMemorySnapshot>,
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct PerfRunConfig {
@@ -47,6 +66,9 @@ pub struct PerfUtteranceRecord {
     pub conf_ms_repeats: Vec<f64>,
     pub align_ms_repeats: Vec<f64>,
     pub total_ms_repeats: Vec<f64>,
+    /// Per-stage GPU memory (gpu_used, gpu_total); present only when benchmark ran with memory profiling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<PerfMemory>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -69,6 +91,16 @@ pub struct PerfAggregateStats {
     pub align_ms_per_ts: PerfMetricStats,
     pub align_ms_per_t: PerfMetricStats,
     pub total_ms: PerfMetricStats,
+    /// Aggregate GPU memory stats; present when records include memory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory: Option<PerfAggregateMemory>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PerfAggregateMemory {
+    pub forward_gpu_used: PerfMetricStats,
+    pub dp_gpu_used: PerfMetricStats,
+    pub gpu_total: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,7 +139,7 @@ impl PerfJsonlAppender {
                 )
             })?;
         Ok(Self {
-            writer: BufWriter::new(file),
+            writer: BufWriter::with_capacity(JSONL_BUFFER_CAPACITY, file),
             writes_since_flush: 0,
         })
     }

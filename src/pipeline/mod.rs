@@ -1,5 +1,9 @@
 pub mod builder;
+#[cfg(feature = "cuda-dp")]
+pub(crate) mod cuda_forward;
 pub mod defaults;
+#[cfg(feature = "alignment-profiling")]
+pub mod memory_tracker;
 pub(crate) mod model_runtime;
 pub mod runtime;
 pub mod traits;

@@ -4,6 +4,57 @@
 // Single block loops over T time steps with __syncthreads().
 // Only bp[] and 2 final scores are copied back to host.
 
+// Log-softmax over rows: logits [T,V] -> log_probs [T,V].
+// One block per row. Used when ORT outputs logits and we need log_probs on GPU.
+extern "C" __global__ void log_softmax_rows(
+    const float* __restrict__ logits,
+    float* __restrict__ log_probs,
+    int t_len,
+    int v_len
+) {
+    int t = blockIdx.x;
+    if (t >= t_len) return;
+    const float* row_in = logits + t * v_len;
+    float* row_out = log_probs + t * v_len;
+
+    // Step 1: find max (block reduction)
+    float max_val = -1e30f;
+    for (int i = threadIdx.x; i < v_len; i += blockDim.x) {
+        float v = row_in[i];
+        if (v > max_val) max_val = v;
+    }
+    __shared__ float smem_max[256];
+    smem_max[threadIdx.x] = max_val;
+    __syncthreads();
+    for (int s = blockDim.x / 2; s > 0; s /= 2) {
+        if (threadIdx.x < s && smem_max[threadIdx.x + s] > smem_max[threadIdx.x]) {
+            smem_max[threadIdx.x] = smem_max[threadIdx.x + s];
+        }
+        __syncthreads();
+    }
+    max_val = smem_max[0];
+
+    // Step 2: sum exp(x - max)
+    float sum = 0.0f;
+    for (int i = threadIdx.x; i < v_len; i += blockDim.x) {
+        sum += expf(row_in[i] - max_val);
+    }
+    __shared__ float smem_sum[256];
+    smem_sum[threadIdx.x] = sum;
+    __syncthreads();
+    for (int s = blockDim.x / 2; s > 0; s /= 2) {
+        if (threadIdx.x < s) smem_sum[threadIdx.x] += smem_sum[threadIdx.x + s];
+        __syncthreads();
+    }
+    float total = smem_sum[0];
+    float log_denom = max_val + logf(total);
+
+    // Step 3: write output
+    for (int i = threadIdx.x; i < v_len; i += blockDim.x) {
+        row_out[i] = row_in[i] - log_denom;
+    }
+}
+
 extern "C" __global__ void viterbi_forward(
     const float* __restrict__ log_probs,   // [T, V] row-major — ORT device ptr
     const int*   __restrict__ tokens,      // [S]
@@ -102,5 +153,29 @@ extern "C" __global__ void viterbi_forward(
     if (lid == 0) {
         out_scores[0] = prev[s_len - 1];
         out_scores[1] = (s_len >= 2) ? prev[s_len - 2] : NEG_INF;
+    }
+}
+
+// Backtrack on GPU: single thread, O(T), reads bp + scores, writes path_out[T].
+// Caller downloads only path_out (T × 4 bytes) instead of bp (T×S × 4 bytes).
+extern "C" __global__ void viterbi_backtrace(
+    const int* __restrict__ bp,         // [T, S]
+    const float* __restrict__ scores,   // [2] final scores
+    int* __restrict__ path_out,         // [T] output: state index per frame
+    int t_len,
+    int s_len
+) {
+    if (threadIdx.x != 0) return;
+
+    int s = s_len - 1;
+    if (s_len >= 2 && scores[1] > scores[0]) {
+        s = s_len - 2;
+    }
+
+    path_out[t_len - 1] = s;
+    for (int t = t_len - 1; t >= 1; t--) {
+        int step = bp[t * s_len + s];
+        s -= step;
+        path_out[t - 1] = s;
     }
 }

@@ -1,152 +1,98 @@
-export interface Report {
-  schema_version: number;
-  meta: Meta;
-  sentences: Sentence[];
-  aggregates?: Aggregates;
+export type Aggregate = "median" | "mean" | "min" | "max" | "p50" | "p90" | "p95" | "p99";
+export type DType = "f16" | "bf16" | "f32" | "f64";
+export type Device = string;
+
+/** GPU memory snapshot at a point in time (used and total in bytes). Used by Rust per-stage memory. */
+export interface GpuMemorySnapshot {
+  gpu_used: number;
+  gpu_total: number;
 }
 
-export interface Meta {
-  generated_at: string;
-  model_path: string;
-  device: string;
-  frame_stride_ms: number;
-  case_count: number;
+/** Process-level GPU memory (bytes). One snapshot per alignment run. Python / flat format. */
+export interface PerfMemory {
+  /** Device-level used VRAM (cudaMemGetInfo: total - free). Comparable Rust/Python. */
+  gpu_used: number;
+  /** Device total VRAM (cudaMemGetInfo). */
+  gpu_total: number;
+  /** Optional: PyTorch allocated tensors only (torch.cuda.memory_allocated). Python only. */
+  gpu_allocated?: number;
 }
 
-export interface Sentence {
-  id: string;
-  split: string;
-  has_reference: boolean;
+/** Per-stage GPU memory (Rust format). Each stage may have a snapshot. */
+export interface PerfMemoryPerStage {
+  forward?: GpuMemorySnapshot;
+  post?: GpuMemorySnapshot;
+  dp?: GpuMemorySnapshot;
+  group?: GpuMemorySnapshot;
+  conf?: GpuMemorySnapshot;
+}
+
+export interface RustPerfRecord {
+  // identity
+  utterance_id: string;
+  audio_path: string;
+
+  // input shape
   duration_ms: number;
-  word_count_pred: number;
-  word_count_ref: number;
-  structural: StructuralMetrics;
-  confidence: ConfidenceMetrics;
-  timing: TimingMetrics;
-  per_word?: PerWord[];
-  notes: string[];
+  num_frames_t: number;
+  state_len: number;
+  ts_product: number;
+  vocab_size: number;
+
+  // runtime
+  dtype: DType;
+  device: Device;
+  frame_stride_ms: number;
+
+  // config
+  warmup: number;
+  repeats: number;
+  aggregate: Aggregate;
+
+  // timings (aggregated)
+  forward_ms: number;
+  post_ms: number;
+  dp_ms: number;
+  group_ms: number;
+  conf_ms: number;
+  align_ms: number;
+  total_ms: number;
+
+  align_ms_per_ts: number;
+  align_ms_per_t: number;
+
+  // raw repeats
+  forward_ms_repeats: number[];
+  post_ms_repeats: number[];
+  dp_ms_repeats: number[];
+  group_ms_repeats: number[];
+  conf_ms_repeats: number[];
+  align_ms_repeats: number[];
+  total_ms_repeats: number[];
+
+  // memory footprint: flat (Python) or per-stage (Rust)
+  memory?: PerfMemory | PerfMemoryPerStage;
 }
 
-export interface StructuralMetrics {
-  negative_duration_word_count: number;
-  overlap_word_count: number;
-  non_monotonic_word_count: number;
-  invalid_confidence_word_count: number;
-  gap_ratio: number;
-  overlap_ratio: number;
+/** Run file format as written by Rust or loaded from JSON. */
+export interface PerfRunFile {
+  schema_version?: number;
+  generated_at?: string;
+  config?: Record<string, unknown>;
+  records: RustPerfRecord[];
 }
 
-export interface ConfidenceMetrics {
-  word_conf_mean: number;
-  word_conf_min: number;
-  low_conf_threshold_used?: number;
-  avg_word_margin?: number | null;
-  avg_boundary_confidence?: number | null;
-  low_conf_word_ratio: number;
-  blank_frame_ratio: number | null;
-  token_entropy_mean: number | null;
-}
-
-export interface TimingMetrics {
-  start: TimingStats;
-  end: TimingStats;
-  abs_err_ms_median: number;
-  abs_err_ms_p90: number;
-  trimmed_mean_abs_err_ms: number;
-  offset_ms: number;
-  drift_ms_per_sec: number;
-  drift_delta_ms?: number;
-}
-
-export interface TimingStats {
-  mean_signed_ms: number;
-  median_abs_ms: number;
-  p90_abs_ms: number;
-  max_abs_ms: number;
-}
-
-export interface PerWord {
-  word: string;
-  ref_start_ms: number;
-  ref_end_ms: number;
-  pred_start_ms: number;
-  pred_end_ms: number;
-  start_err_ms: number;
-  end_err_ms: number;
-  conf: number | null;
-  quality_confidence?: number | null;
-  calibrated_confidence?: number | null;
-  mean_logp?: number | null;
-  geo_mean_prob?: number | null;
-  min_logp?: number | null;
-  p10_logp?: number | null;
-  mean_margin?: number | null;
-  coverage_frame_count?: number;
-  boundary_confidence?: number | null;
-}
-
-export interface Aggregates {
-  counts: {
-    total: number;
-    with_reference: number;
-    without_reference: number;
-  };
-  global: AggregateMetrics;
-  by_split: Record<string, AggregateMetrics>;
-  outliers?: OutlierMetrics;
-}
-
-export interface AggregateMetrics {
-  abs_err_ms_median: StatsDistribution | null;
-  abs_err_ms_p90: StatsDistribution | null;
-  drift_ms_per_sec: StatsDistribution | null;
-  drift_delta_ms?: StatsDistribution | null;
-  low_conf_word_ratio: StatsDistribution | null;
-  avg_word_margin?: StatsDistribution | null;
-  avg_boundary_confidence?: StatsDistribution | null;
-  blank_frame_ratio: StatsDistribution | null;
-  abs_err_ms_p90_pass_rate?: ThresholdPassRates | null;
-  word_abs_err_ms?: StatsDistribution | null;
-  word_abs_err_pass_rate?: ThresholdPassRates | null;
-}
-
-export interface ThresholdPassRates {
-  le_50_ms: number;
-  le_100_ms: number;
-  le_150_ms: number;
-}
-
-export interface StatsDistribution {
-  mean: number;
-  p50: number;
-  p90: number;
-  p95: number;
-  p99: number;
-}
-
-export interface OutlierMetrics {
-  worst_abs_err_ms_p90?: OutlierEntry[];
-  worst_drift_ms_per_sec?: OutlierEntry[];
-  worst_low_conf_word_ratio?: OutlierEntry[];
-}
-
-export interface OutlierEntry {
+/** A run loaded in the app (user can rename, toggle visibility). */
+export interface LoadedRun {
   id: string;
-  split: string;
-  value: number;
-}
-
-export interface FilterOptions {
-  split: 'all' | 'clean' | 'other';
-  has_reference: 'all' | 'true' | 'false';
-  duration_range: [number, number];
-  confidence_threshold: number;
-  search_id: string;
-}
-
-export interface LoadedReport {
-  id: string;
-  filename: string;
-  data: Report;
+  name: string;
+  records: RustPerfRecord[];
   loadedAt: Date;
+}
+
+/** Global filters applied to all runs for charts and KPIs. */
+export interface GlobalFilters {
+  duration_range: [number, number];
+  frame_count_range: [number, number];
+  search_id: string;
 }

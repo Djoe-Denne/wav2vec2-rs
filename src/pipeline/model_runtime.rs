@@ -9,7 +9,7 @@ use crate::config::{Wav2Vec2Config, Wav2Vec2ModelConfig};
 use crate::error::AlignmentError;
 use crate::model::ctc_model::Wav2Vec2ForCTC;
 use crate::pipeline::traits::{
-    ProfiledRuntimeInferenceOutput, RuntimeBackend, RuntimeInferenceOutput, RuntimeKind,
+    ForwardOutput, ProfiledForwardOutput, RuntimeBackend, RuntimeInferenceOutput, RuntimeKind,
 };
 
 pub(crate) fn build_runtime_backend(
@@ -85,7 +85,7 @@ impl CandleRuntimeBackend {
 }
 
 impl RuntimeBackend for CandleRuntimeBackend {
-    fn infer(&self, normalized_audio: &[f32]) -> Result<RuntimeInferenceOutput, AlignmentError> {
+    fn infer(&self, normalized_audio: &[f32]) -> Result<ForwardOutput, AlignmentError> {
         let audio_tensor = self.build_audio_tensor(normalized_audio)?;
         let logits = self
             .model
@@ -103,18 +103,18 @@ impl RuntimeBackend for CandleRuntimeBackend {
             .to_vec2()
             .map_err(|e| AlignmentError::runtime("to_vec2", e))?;
 
-        Ok(RuntimeInferenceOutput {
+        Ok(ForwardOutput::Host(RuntimeInferenceOutput {
             log_probs,
             num_frames_t,
             vocab_size,
             dtype,
-        })
+        }))
     }
 
     fn infer_profiled(
         &self,
         normalized_audio: &[f32],
-    ) -> Result<ProfiledRuntimeInferenceOutput, AlignmentError> {
+    ) -> Result<ProfiledForwardOutput, AlignmentError> {
         let audio_tensor = self.build_audio_tensor(normalized_audio)?;
 
         self.synchronize("cuda synchronize before forward timing")?;
@@ -141,13 +141,13 @@ impl RuntimeBackend for CandleRuntimeBackend {
         self.synchronize("cuda synchronize after post timing")?;
         let post_ms = duration_to_ms(post_started.elapsed());
 
-        Ok(ProfiledRuntimeInferenceOutput {
-            output: RuntimeInferenceOutput {
+        Ok(ProfiledForwardOutput {
+            forward_output: ForwardOutput::Host(RuntimeInferenceOutput {
                 log_probs,
                 num_frames_t,
                 vocab_size,
                 dtype,
-            },
+            }),
             forward_ms,
             post_ms,
         })
@@ -205,6 +205,7 @@ impl OnnxRuntimeBackend {
         })
     }
 
+    #[allow(dead_code)]
     fn run_raw_logits(&self, normalized_audio: &[f32]) -> Result<OnnxRawLogits, AlignmentError> {
         let input = ort::value::TensorRef::from_array_view((
             [1usize, normalized_audio.len()],
@@ -233,29 +234,69 @@ impl OnnxRuntimeBackend {
             logits: logits.to_vec(),
         })
     }
+
+    fn run_forward(&self, normalized_audio: &[f32]) -> Result<ForwardOutput, AlignmentError> {
+        let input = ort::value::TensorRef::from_array_view((
+            [1usize, normalized_audio.len()],
+            normalized_audio,
+        ))
+        .map_err(|e| AlignmentError::runtime("onnx input tensor", e))?;
+        let mut session = self
+            .session
+            .lock()
+            .map_err(|_| AlignmentError::runtime("onnx session lock", "session mutex poisoned"))?;
+        let outputs = session
+            .run(ort::inputs![input])
+            .map_err(|e| AlignmentError::runtime("onnx forward pass", e))?;
+        if outputs.len() == 0 {
+            return Err(AlignmentError::runtime(
+                "onnx forward pass",
+                "model produced no outputs",
+            ));
+        }
+        let output = &outputs[0];
+
+        #[cfg(all(feature = "onnx", feature = "cuda-dp"))]
+        if self.device_label == "cuda" {
+            if let Some(cuda_output) =
+                try_cuda_forward_output(output)
+            {
+                return Ok(ForwardOutput::CudaDevice(cuda_output));
+            }
+        }
+
+        let raw = {
+            let (shape, logits) = output
+                .try_extract_tensor::<f32>()
+                .map_err(|e| AlignmentError::runtime("onnx extract logits", e))?;
+            OnnxRawLogits {
+                dims: shape.iter().copied().collect(),
+                logits: logits.to_vec(),
+            }
+        };
+        let runtime_output = onnx_raw_logits_to_log_probs(raw)?;
+        Ok(ForwardOutput::Host(runtime_output))
+    }
 }
 
 #[cfg(feature = "onnx")]
 impl RuntimeBackend for OnnxRuntimeBackend {
-    fn infer(&self, normalized_audio: &[f32]) -> Result<RuntimeInferenceOutput, AlignmentError> {
-        let raw = self.run_raw_logits(normalized_audio)?;
-        onnx_raw_logits_to_log_probs(raw)
+    fn infer(&self, normalized_audio: &[f32]) -> Result<ForwardOutput, AlignmentError> {
+        self.run_forward(normalized_audio)
     }
 
     fn infer_profiled(
         &self,
         normalized_audio: &[f32],
-    ) -> Result<ProfiledRuntimeInferenceOutput, AlignmentError> {
+    ) -> Result<ProfiledForwardOutput, AlignmentError> {
         let forward_started = Instant::now();
-        let raw = self.run_raw_logits(normalized_audio)?;
+        let forward_output = self.run_forward(normalized_audio)?;
         let forward_ms = duration_to_ms(forward_started.elapsed());
+        // post_ms = 0 for CudaDevice (zero-copy); for Host the extraction is included in forward
+        let post_ms = 0.0;
 
-        let post_started = Instant::now();
-        let output = onnx_raw_logits_to_log_probs(raw)?;
-        let post_ms = duration_to_ms(post_started.elapsed());
-
-        Ok(ProfiledRuntimeInferenceOutput {
-            output,
+        Ok(ProfiledForwardOutput {
+            forward_output,
             forward_ms,
             post_ms,
         })
@@ -289,6 +330,38 @@ fn onnx_execution_providers(
             "unsupported ONNX device '{device}', expected 'cpu' or 'cuda'"
         ))),
     }
+}
+
+#[cfg(all(feature = "onnx", feature = "cuda-dp"))]
+fn try_cuda_forward_output(
+    output: &ort::value::DynValue,
+) -> Option<crate::pipeline::cuda_forward::CudaLogProbsBuffer> {
+    use crate::alignment::viterbi::cuda::log_softmax_logits_to_device;
+    use crate::pipeline::cuda_forward::CudaLogProbsBuffer;
+    use ort::memory::AllocationDevice;
+    use ort::value::DynTensorValueType;
+
+    let tensor_ref = output.downcast_ref::<DynTensorValueType>().ok()?;
+    let mem_info = tensor_ref.memory_info();
+    if mem_info.allocation_device() != AllocationDevice::CUDA {
+        return None;
+    }
+
+    let shape = tensor_ref.shape();
+    let dims: &[i64] = shape.as_ref();
+    let (t_len, v_len) = match dims {
+        [batch, t, v] if *batch == 1 && *t > 0 && *v > 0 => (*t as usize, *v as usize),
+        [t, v] if *t > 0 && *v > 0 => (*t as usize, *v as usize),
+        _ => return None,
+    };
+
+    let ptr = tensor_ref.data_ptr() as *const f32;
+    if ptr.is_null() {
+        return None;
+    }
+
+    let (ctx, slice) = unsafe { log_softmax_logits_to_device(ptr, t_len, v_len)? };
+    Some(CudaLogProbsBuffer::new(ctx, slice, t_len, v_len))
 }
 
 #[cfg(feature = "onnx")]
