@@ -38,10 +38,12 @@ This project was heavily inspired by [wav2vec2aligner](https://github.com/EveryV
 
 | Feature                  | Description                                                        |
 |--------------------------|--------------------------------------------------------------------|
-| `gpu-dp`                 | wgpu Viterbi backend (Vulkan, DX12, Metal)                        |
+| `wgpu-dp`                 | wgpu Viterbi backend (Vulkan, DX12, Metal)                        |
 | `cuda-dp`                | CUDA Viterbi backend via cudarc + NVRTC (requires CUDA toolkit)   |
 | `onnx`                   | ONNX Runtime model backend (CPU or CUDA execution provider)       |
 | `alignment-profiling`    | Per-stage timing and memory profiling (benchmark mode)             |
+
+CI runs only CPU backends (default + `onnx`); GPU features (`wgpu-dp`, `cuda-dp`) are not tested in CI.
 
 ### Basic (CPU only, Candle runtime)
 
@@ -52,7 +54,7 @@ cargo build --release
 ### With GPU Viterbi (wgpu)
 
 ```bash
-cargo build --release --features gpu-dp
+cargo build --release --features wgpu-dp
 ```
 
 ### Full CUDA pipeline (ONNX + CUDA Viterbi zero-copy)
@@ -278,7 +280,7 @@ There is no strong performance reason for having both the wgpu and CUDA backends
 
 **CPU** — Scalar DP with ping-pong score arrays. Two `Vec<f32>` of length S are swapped each time step. Reference implementation, always available.
 
-**wgpu** (`gpu-dp` feature) — A single compute shader dispatch runs the entire T-step DP in one workgroup of 256 threads using `workgroupBarrier()` synchronization. Only the T-length path buffer is copied back to host. Supports Vulkan, DX12, and Metal.
+**wgpu** (`wgpu-dp` feature) — A single compute shader dispatch runs the entire T-step DP in one workgroup of 256 threads using `workgroupBarrier()` synchronization. Only the T-length path buffer is copied back to host. Supports Vulkan, DX12, and Metal.
 
 **CUDA** (`cuda-dp` feature) — Three kernels compiled at runtime via NVRTC: `log_softmax_rows` (shared-memory reduction), `viterbi_forward` (wavefront DP in dynamic shared memory), and `viterbi_backtrace` (single-thread O(T) path extraction). When ORT runs on CUDA, the entire log-softmax → Viterbi → backtrace pipeline executes on device with zero-copy — only the final path array transfers to host.
 

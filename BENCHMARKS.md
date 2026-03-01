@@ -77,7 +77,7 @@ cargo run --release --features "onnx,cuda-dp,alignment-profiling,report-cli" \
     --perf-append
 ```
 
-For CPU-only benchmarks, use `--device cpu` and drop the `cuda-dp` feature. For the wgpu backend, use `--features "onnx,gpu-dp,alignment-profiling,report-cli"`.
+For CPU-only benchmarks, use `--device cpu` and drop the `cuda-dp` feature. For the wgpu backend, use `--features "onnx,wgpu-dp,alignment-profiling,report-cli"`.
 
 ### Python benchmark
 

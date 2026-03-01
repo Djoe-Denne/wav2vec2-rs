@@ -32,9 +32,9 @@ default = []
 alignment-profiling = ["dep:libc", "dep:windows-sys"]
 report-cli = ["dep:chrono", "dep:clap", "dep:claxon", "dep:textgrid", "dep:indicatif"]
 onnx = ["dep:ort"]
-gpu-dp = ["wgpu", "pollster", "bytemuck"]
+wgpu-dp = ["wgpu", "pollster", "bytemuck"]
 cuda-dp = ["cudarc"]
-full-gpu = ["onnx", "gpu-dp"]
+full-gpu = ["onnx", "wgpu-dp"]
 
 [[bin]]
 name = "alignment_report"

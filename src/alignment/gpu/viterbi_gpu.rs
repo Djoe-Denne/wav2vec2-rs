@@ -1,6 +1,6 @@
 //! GPU-accelerated CTC Viterbi forced alignment via wgpu compute shaders.
 //!
-//! Enabled with the `gpu-dp` feature flag. Falls back to CPU Viterbi when
+//! Enabled with the `wgpu-dp` feature flag. Falls back to CPU Viterbi when
 //! the feature is disabled or GPU initialization fails.
 //!
 //! The shader runs the entire T-step DP in a single dispatch using one

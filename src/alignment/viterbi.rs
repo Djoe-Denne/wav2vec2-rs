@@ -2,7 +2,7 @@
 #[path = "cuda/viterbi_cuda.rs"]
 pub mod cuda;
 
-#[cfg(feature = "gpu-dp")]
+#[cfg(feature = "wgpu-dp")]
 #[path = "gpu/viterbi_gpu.rs"]
 pub mod gpu;
 
@@ -13,13 +13,13 @@ const GPU_DP_THRESHOLD: usize = 40_000;
 ///
 /// Dispatch priority:
 /// 1. `cuda-dp` zero-copy (reads ORT output directly on GPU — no transfer)
-/// 2. `gpu-dp` wgpu (Vulkan/DX12/Metal — needs host log_probs)
+/// 2. `wgpu-dp` wgpu (Vulkan/DX12/Metal — needs host log_probs)
 /// 3. CPU fallback (always available)
 pub fn forced_align_viterbi(log_probs: &[Vec<f32>], tokens: &[usize]) -> Vec<(usize, usize)> {
     let ts_product = log_probs.len() * tokens.len();
 
     if ts_product >= GPU_DP_THRESHOLD {
-        #[cfg(feature = "gpu-dp")]
+        #[cfg(feature = "wgpu-dp")]
         {
             if let Some(path) = gpu::forced_align_viterbi_gpu(log_probs, tokens) {
                 return path;
