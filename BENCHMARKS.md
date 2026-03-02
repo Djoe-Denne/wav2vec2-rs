@@ -52,6 +52,26 @@ Memory profiling captures GPU device memory usage (`cudaMemGetInfo` on both side
 
 ---
 
+## Benchmark assets in CI (GitHub Actions)
+
+Benchmark data (LibriSpeech, Python reference TextGrids, and the model) are prepared and cached by manual workflows so that GPU benchmarks can run without re-downloading on every run.
+
+### 1. Prepare benchmark assets
+
+Run the **Prepare benchmark assets** workflow (`Actions → Prepare benchmark assets → Run workflow`) to populate caches:
+
+- **LibriSpeech** — Downloads test-clean and test-other from OpenSLR 12 into `test-data/LibriSpeech` (cache key: `librispeech-slr12-test-v1`).
+- **Python reference TextGrids** — Generates reference alignments with wav2vec2aligner and stores them under `ci-assets/python-reference-textgrids` (cache key includes script + patch hash).
+- **Model** — Downloads from Hugging Face (or an archive URL) into `ci-assets/model` (cache key is a hash of source/repo/revision/patterns or archive URL).
+
+You can run one, two, or all three steps in a single workflow run. Use the same **model inputs** (repo id, revision, allow patterns, or archive URL) when you later run the GPU manual workflow so that the model cache key matches.
+
+### 2. GPU manual (benchmark)
+
+Run the **GPU manual (benchmark)** workflow (`Actions → GPU manual (benchmark) → Run workflow`) after at least the **model** cache has been prepared. Set the model inputs to the same values you used in Prepare benchmark assets (same `model_repo_id`, `model_revision`, `model_allow_patterns`, or `model_archive_url`). The workflow restores the three caches, builds the Rust binary with GPU features, and runs the alignment benchmark with `--model-dir ci-assets/model` and `--dataset-root test-data`. If the model cache is missing, the job fails with a message to run Prepare benchmark assets first.
+
+---
+
 ## How to reproduce
 
 ### Rust benchmark

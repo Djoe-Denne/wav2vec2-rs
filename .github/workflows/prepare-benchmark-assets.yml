@@ -1,0 +1,275 @@
+name: Prepare benchmark assets
+
+on:
+  workflow_dispatch:
+    inputs:
+      prepare_dataset:
+        description: "Download/cache LibriSpeech test-clean and test-other"
+        required: true
+        type: boolean
+        default: true
+
+      prepare_python_reference:
+        description: "Generate/cache Python reference TextGrids"
+        required: true
+        type: boolean
+        default: true
+
+      prepare_model:
+        description: "Download/cache model"
+        required: true
+        type: boolean
+        default: true
+
+      model_source:
+        description: "Model source"
+        required: true
+        type: choice
+        default: hf
+        options:
+          - hf
+          - archive
+
+      model_repo_id:
+        description: "HF repo id, e.g. org/model"
+        required: false
+        type: string
+        default: ""
+
+      model_revision:
+        description: "HF revision/commit/tag"
+        required: false
+        type: string
+        default: "main"
+
+      model_allow_patterns:
+        description: "Comma-separated allow patterns for HF snapshot_download"
+        required: false
+        type: string
+        default: "*.onnx,config.json,vocab.json"
+
+      model_archive_url:
+        description: "Archive URL if model_source=archive"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  LIBRISPEECH_ROOT: test-data/LibriSpeech
+  PY_REF_ROOT: ci-assets/python-reference-textgrids
+  MODEL_ROOT: ci-assets/model
+
+jobs:
+  dataset:
+    if: ${{ inputs.prepare_dataset }}
+    name: Prepare LibriSpeech
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore LibriSpeech cache
+        id: cache-dataset
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.LIBRISPEECH_ROOT }}
+          key: librispeech-slr12-test-v1
+
+      - name: Download LibriSpeech
+        if: steps.cache-dataset.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p test-data
+          cd test-data
+          curl -L https://openslr.trmal.net/resources/12/test-clean.tar.gz -o test-clean.tar.gz
+          curl -L https://openslr.trmal.net/resources/12/test-other.tar.gz -o test-other.tar.gz
+          tar -xzf test-clean.tar.gz
+          tar -xzf test-other.tar.gz
+          rm -f test-clean.tar.gz test-other.tar.gz
+          test -d LibriSpeech/test-clean
+          test -d LibriSpeech/test-other
+
+      - name: Save LibriSpeech cache
+        if: steps.cache-dataset.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.LIBRISPEECH_ROOT }}
+          key: librispeech-slr12-test-v1
+
+  model:
+    if: ${{ inputs.prepare_model }}
+    name: Prepare model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute model cache key
+        id: model-key
+        shell: bash
+        run: |
+          raw="${{ inputs.model_source }}-${{ inputs.model_repo_id }}-${{ inputs.model_revision }}-${{ inputs.model_allow_patterns }}-${{ inputs.model_archive_url }}"
+          key="model-v1-$(echo -n "$raw" | sha256sum | head -c 32)"
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore model cache
+        id: cache-model
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.MODEL_ROOT }}
+          key: ${{ steps.model-key.outputs.key }}
+
+      - name: Set up Python
+        if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'hf'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install huggingface_hub
+        if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'hf'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install "huggingface_hub"
+
+      - name: Download model from Hugging Face
+        if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'hf'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "${{ env.MODEL_ROOT }}"
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+
+          repo_id = os.environ["MODEL_REPO_ID"]
+          revision = os.environ["MODEL_REVISION"]
+          local_dir = os.environ["MODEL_ROOT"]
+          raw_patterns = os.environ.get("MODEL_ALLOW_PATTERNS", "").strip()
+          allow_patterns = [p.strip() for p in raw_patterns.split(",") if p.strip()] or None
+
+          snapshot_download(
+              repo_id=repo_id,
+              revision=revision,
+              local_dir=local_dir,
+              allow_patterns=allow_patterns,
+          )
+          PY
+        env:
+          MODEL_REPO_ID: ${{ inputs.model_repo_id }}
+          MODEL_REVISION: ${{ inputs.model_revision }}
+          MODEL_ALLOW_PATTERNS: ${{ inputs.model_allow_patterns }}
+          MODEL_ROOT: ${{ env.MODEL_ROOT }}
+
+      - name: Download model archive
+        if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'archive'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "${{ env.MODEL_ROOT }}"
+          curl -L "${{ inputs.model_archive_url }}" -o /tmp/model-archive
+          mkdir -p /tmp/model-extract
+          case "${{ inputs.model_archive_url }}" in
+            *.tar.gz|*.tgz)
+              tar -xzf /tmp/model-archive -C /tmp/model-extract
+              ;;
+            *.zip)
+              unzip -q /tmp/model-archive -d /tmp/model-extract
+              ;;
+            *)
+              echo "Unsupported archive type"
+              exit 1
+              ;;
+          esac
+          cp -R /tmp/model-extract/. "${{ env.MODEL_ROOT }}/"
+
+      - name: Validate model layout
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -f "${{ env.MODEL_ROOT }}/config.json"
+          test -f "${{ env.MODEL_ROOT }}/vocab.json"
+          find "${{ env.MODEL_ROOT }}" -maxdepth 1 \( -name "*.onnx" -o -name "*.safetensors" \) | grep -q .
+
+      - name: Save model cache
+        if: steps.cache-model.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.MODEL_ROOT }}
+          key: ${{ steps.model-key.outputs.key }}
+
+  python-reference:
+    if: ${{ inputs.prepare_python_reference }}
+    name: Prepare Python reference TextGrids
+    runs-on: ubuntu-latest
+    needs: [dataset]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore LibriSpeech cache
+        id: cache-dataset
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.LIBRISPEECH_ROOT }}
+          key: librispeech-slr12-test-v1
+
+      - name: Fail if dataset is missing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "${{ steps.cache-dataset.outputs.cache-hit }}" = "true"
+          test -d "${{ env.LIBRISPEECH_ROOT }}/test-clean"
+          test -d "${{ env.LIBRISPEECH_ROOT }}/test-other"
+
+      - name: Restore Python reference cache
+        id: cache-pyref
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PY_REF_ROOT }}
+          key: python-ref-textgrids-v1-${{ hashFiles('scripts/wav2vec2aligner_librispeech_textgrids.py', 'wav2vec2aligner-main.perf-monitoring.patch') }}
+          restore-keys: |
+            python-ref-textgrids-v1-
+
+      - name: Set up Python
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          pip install -r scripts/requirements.txt
+
+      - name: Clone wav2vec2aligner and apply patch
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/EveryVoiceTTS/wav2vec2aligner.git wav2vec2aligner-main
+          git -C wav2vec2aligner-main apply ../wav2vec2aligner-main.perf-monitoring.patch
+
+      - name: Generate Python reference TextGrids
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p "${{ env.PY_REF_ROOT }}"
+          python scripts/wav2vec2aligner_librispeech_textgrids.py \
+            --dataset-root "${{ env.LIBRISPEECH_ROOT }}" \
+            --output-root "${{ env.PY_REF_ROOT }}" \
+            --device cpu
+
+      - name: Save Python reference cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PY_REF_ROOT }}
+          key: python-ref-textgrids-v1-${{ hashFiles('scripts/wav2vec2aligner_librispeech_textgrids.py', 'wav2vec2aligner-main.perf-monitoring.patch') }}

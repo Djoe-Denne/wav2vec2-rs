@@ -25,6 +25,12 @@ def parse_args() -> argparse.Namespace:
         help="Root directory that contains subset folders like test-clean/test-other.",
     )
     parser.add_argument(
+        "--output-root",
+        type=Path,
+        default=None,
+        help="If set, write .TextGrid files under this directory mirroring --dataset-root layout; otherwise write next to each .flac.",
+    )
+    parser.add_argument(
         "--subsets",
         default="test-clean,test-other",
         help="Comma-separated subset names under --dataset-root.",
@@ -367,7 +373,11 @@ def main() -> int:
                 break
             seen += 1
 
-            tg_path = audio_path.with_suffix(".TextGrid")
+            if args.output_root is not None:
+                rel = audio_path.resolve().relative_to(dataset_root.resolve())
+                tg_path = (args.output_root / rel).with_suffix(".TextGrid")
+            else:
+                tg_path = audio_path.with_suffix(".TextGrid")
             if tg_path.exists() and not args.overwrite:
                 skipped += 1
                 continue
@@ -547,6 +557,7 @@ def main() -> int:
                 )
                 tg.tiers += words_tg.get_tiers()
                 tg.tiers += sentences_tg.get_tiers()
+                ensure_parent_dir(tg_path)
                 tg.to_file(tg_path)
                 success += 1
             except Exception as exc:  # noqa: BLE001

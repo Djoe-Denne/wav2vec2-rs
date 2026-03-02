@@ -46,7 +46,7 @@ This project was heavily inspired by [wav2vec2aligner](https://github.com/EveryV
 | `onnx`                   | ONNX Runtime model backend (CPU or CUDA execution provider)       |
 | `alignment-profiling`    | Per-stage timing and memory profiling (benchmark mode)             |
 
-CI runs only CPU backends (default + `onnx`); GPU features (`wgpu-dp`, `cuda-dp`) are not tested in CI.
+CI runs only CPU backends (default + `onnx`); GPU features (`wgpu-dp`, `cuda-dp`) are not tested in CI. For GPU benchmarks in CI, use the manual workflows **Prepare benchmark assets** and **GPU manual (benchmark)**; see [BENCHMARKS.md](BENCHMARKS.md#benchmark-assets-in-ci-github-actions).
 
 ### Basic (CPU only, Candle runtime)
 

@@ -1,0 +1,118 @@
+name: GPU manual (benchmark)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_source:
+        description: "Model source (must match Prepare benchmark assets)"
+        required: true
+        type: choice
+        default: hf
+        options:
+          - hf
+          - archive
+
+      model_repo_id:
+        description: "HF repo id (must match Prepare benchmark assets)"
+        required: false
+        type: string
+        default: ""
+
+      model_revision:
+        description: "HF revision (must match Prepare benchmark assets)"
+        required: false
+        type: string
+        default: "main"
+
+      model_allow_patterns:
+        description: "HF allow patterns (must match Prepare benchmark assets)"
+        required: false
+        type: string
+        default: "*.onnx,config.json,vocab.json"
+
+      model_archive_url:
+        description: "Archive URL if model_source=archive (must match Prepare benchmark assets)"
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  LIBRISPEECH_ROOT: test-data/LibriSpeech
+  PY_REF_ROOT: ci-assets/python-reference-textgrids
+  MODEL_ROOT: ci-assets/model
+
+jobs:
+  benchmark:
+    name: GPU benchmark
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute model cache key
+        id: model-key
+        shell: bash
+        run: |
+          raw="${{ inputs.model_source }}-${{ inputs.model_repo_id }}-${{ inputs.model_revision }}-${{ inputs.model_allow_patterns }}-${{ inputs.model_archive_url }}"
+          key="model-v1-$(echo -n "$raw" | sha256sum | head -c 32)"
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore LibriSpeech cache
+        id: cache-dataset
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.LIBRISPEECH_ROOT }}
+          key: librispeech-slr12-test-v1
+
+      - name: Restore Python reference cache
+        id: cache-pyref
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PY_REF_ROOT }}
+          key: python-ref-textgrids-v1-${{ hashFiles('scripts/wav2vec2aligner_librispeech_textgrids.py', 'wav2vec2aligner-main.perf-monitoring.patch') }}
+          restore-keys: |
+            python-ref-textgrids-v1-
+
+      - name: Restore model cache
+        id: cache-model
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.MODEL_ROOT }}
+          key: ${{ steps.model-key.outputs.key }}
+
+      - name: Fail if model is missing
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ "${{ steps.cache-model.outputs.cache-hit }}" != "true" ]; then
+            echo "Model cache missing. Run 'Prepare benchmark assets' workflow first with the same model inputs."
+            exit 1
+          fi
+          test -f "${{ env.MODEL_ROOT }}/config.json"
+          test -f "${{ env.MODEL_ROOT }}/vocab.json"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (release, GPU features)
+        run: cargo build --release --features "onnx,cuda-dp,alignment-profiling,report-cli"
+
+      - name: Run alignment benchmark
+        run: |
+          cargo run --release --features "onnx,cuda-dp,alignment-profiling,report-cli" \
+            --bin alignment_report -- \
+            --model-dir "${{ env.MODEL_ROOT }}" \
+            --dataset-root test-data \
+            --device cuda \
+            --runtime onnx \
+            --output-format perf \
+            --perf-out target/perf/rust-cuda.jsonl \
+            --perf-warmup 10 \
+            --perf-repeats 30 \
+            --perf-aggregate median \
+            --perf-append
