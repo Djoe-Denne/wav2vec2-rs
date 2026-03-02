@@ -8,9 +8,7 @@ on:
         required: true
         type: choice
         default: hf
-        options:
-          - hf
-          - archive
+        options: [hf, archive]
 
       model_repo_id:
         description: "HF repo id (must match Prepare benchmark assets)"
@@ -39,6 +37,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: gpu-benchmark-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   LIBRISPEECH_ROOT: test-data/LibriSpeech
   PY_REF_ROOT: ci-assets/python-reference-textgrids
@@ -47,7 +49,11 @@ env:
 jobs:
   benchmark:
     name: GPU benchmark
-    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    runs-on:
+      group: gpu-runners
+      labels: ubuntu-gpu
+
     steps:
       - uses: actions/checkout@v4
 
@@ -82,20 +88,33 @@ jobs:
           path: ${{ env.MODEL_ROOT }}
           key: ${{ steps.model-key.outputs.key }}
 
-      - name: Fail if model is missing
+      - name: Fail if benchmark assets are missing
         shell: bash
         run: |
           set -euxo pipefail
-          if [ "${{ steps.cache-model.outputs.cache-hit }}" != "true" ]; then
-            echo "Model cache missing. Run 'Prepare benchmark assets' workflow first with the same model inputs."
+
+          if [ "${{ steps.cache-dataset.outputs.cache-hit }}" != "true" ]; then
+            echo "LibriSpeech cache missing. Run 'Prepare benchmark assets' first."
             exit 1
           fi
+
+          if [ "${{ steps.cache-pyref.outputs.cache-hit }}" != "true" ]; then
+            echo "Python reference cache missing. Run 'Prepare benchmark assets' first."
+            exit 1
+          fi
+
+          if [ "${{ steps.cache-model.outputs.cache-hit }}" != "true" ]; then
+            echo "Model cache missing. Run 'Prepare benchmark assets' first with the same model inputs."
+            exit 1
+          fi
+
+          test -d "${{ env.LIBRISPEECH_ROOT }}/test-clean"
+          test -d "${{ env.LIBRISPEECH_ROOT }}/test-other"
+          test -d "${{ env.PY_REF_ROOT }}"
           test -f "${{ env.MODEL_ROOT }}/config.json"
           test -f "${{ env.MODEL_ROOT }}/vocab.json"
 
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
 
@@ -116,3 +135,10 @@ jobs:
             --perf-repeats 30 \
             --perf-aggregate median \
             --perf-append
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-cuda-perf
+          path: target/perf/rust-cuda.jsonl
+          if-no-files-found: error

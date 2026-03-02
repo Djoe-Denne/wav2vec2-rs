@@ -57,10 +57,19 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: prepare-benchmark-assets
+  cancel-in-progress: false
+
 env:
   LIBRISPEECH_ROOT: test-data/LibriSpeech
-  PY_REF_ROOT: ci-assets/python-reference-textgrids
   MODEL_ROOT: ci-assets/model
+  PY_REF_ROOT: ci-assets/python-reference-textgrids
+  PY_WHEELHOUSE: ci-assets/python-wheelhouse
+  PY_BASELINE_REPO: wav2vec2aligner-main
+  PYTHON_VERSION: "3.11"
+  PYTORCH_INDEX_URL: https://download.pytorch.org/whl/cu128
+  PY_EXTRA_INDEX_URL: https://pypi.org/simple
 
 jobs:
   dataset:
@@ -77,7 +86,7 @@ jobs:
           path: ${{ env.LIBRISPEECH_ROOT }}
           key: librispeech-slr12-test-v1
 
-      - name: Download LibriSpeech
+      - name: Download LibriSpeech test-clean + test-other
         if: steps.cache-dataset.outputs.cache-hit != 'true'
         shell: bash
         run: |
@@ -125,7 +134,7 @@ jobs:
         if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'hf'
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install huggingface_hub
         if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'hf'
@@ -133,14 +142,19 @@ jobs:
         run: |
           set -euxo pipefail
           python -m pip install --upgrade pip
-          python -m pip install "huggingface_hub"
+          python -m pip install huggingface_hub
 
       - name: Download model from Hugging Face
         if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'hf'
         shell: bash
+        env:
+          MODEL_REPO_ID: ${{ inputs.model_repo_id }}
+          MODEL_REVISION: ${{ inputs.model_revision }}
+          MODEL_ALLOW_PATTERNS: ${{ inputs.model_allow_patterns }}
+          MODEL_ROOT: ${{ env.MODEL_ROOT }}
         run: |
           set -euxo pipefail
-          mkdir -p "${{ env.MODEL_ROOT }}"
+          mkdir -p "${MODEL_ROOT}"
           python - <<'PY'
           import os
           from huggingface_hub import snapshot_download
@@ -158,23 +172,18 @@ jobs:
               allow_patterns=allow_patterns,
           )
           PY
-        env:
-          MODEL_REPO_ID: ${{ inputs.model_repo_id }}
-          MODEL_REVISION: ${{ inputs.model_revision }}
-          MODEL_ALLOW_PATTERNS: ${{ inputs.model_allow_patterns }}
-          MODEL_ROOT: ${{ env.MODEL_ROOT }}
 
-      - name: Copy model.onnx to model root (HF onnx subdir layout)
+      - name: Flatten model.onnx to model root when needed
         if: steps.cache-model.outputs.cache-hit != 'true' && inputs.model_source == 'hf'
         shell: bash
         run: |
           set -euxo pipefail
           root="${{ env.MODEL_ROOT }}"
           if [ -f "$root/model.onnx" ]; then
-            echo "model.onnx already at root, skipping copy"
+            echo "model.onnx already at root"
             exit 0
           fi
-          src=$(find "$root" -name "model.onnx" -type f 2>/dev/null | head -1)
+          src="$(find "$root" -name "model.onnx" -type f 2>/dev/null | head -1 || true)"
           if [ -n "$src" ]; then
             cp "$src" "$root/model.onnx"
             echo "Copied $src to $root/model.onnx"
@@ -209,9 +218,8 @@ jobs:
           set -euxo pipefail
           test -f "${{ env.MODEL_ROOT }}/config.json"
           test -f "${{ env.MODEL_ROOT }}/vocab.json"
-          # Allow weight files at any depth (HF may use a subdirectory)
-          count=$(find "${{ env.MODEL_ROOT }}" \( -name "*.onnx" -o -name "*.safetensors" \) 2>/dev/null | wc -l)
-          test "$count" -gt 0 || (echo "No .onnx or .safetensors under ${{ env.MODEL_ROOT }}" && exit 1)
+          count="$(find "${{ env.MODEL_ROOT }}" \( -name "*.onnx" -o -name "*.safetensors" \) 2>/dev/null | wc -l)"
+          test "$count" -gt 0 || (echo "No .onnx or .safetensors found under ${{ env.MODEL_ROOT }}" && exit 1)
 
       - name: Save model cache
         if: steps.cache-model.outputs.cache-hit != 'true'
@@ -220,9 +228,9 @@ jobs:
           path: ${{ env.MODEL_ROOT }}
           key: ${{ steps.model-key.outputs.key }}
 
-  python-reference:
+  python-reference-prep:
     if: ${{ inputs.prepare_python_reference }}
-    name: Prepare Python reference TextGrids
+    name: Prepare Python baseline assets (CPU)
     runs-on: ubuntu-latest
     needs: [dataset, model]
     steps:
@@ -254,10 +262,11 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          test "${{ steps.cache-dataset.outputs.cache-hit }}" = "true"
+          test "${{ steps.cache-dataset.outputs.cache-hit }}" = "true" || (echo "Dataset cache missing" && exit 1)
           test -d "${{ env.LIBRISPEECH_ROOT }}/test-clean"
           test -d "${{ env.LIBRISPEECH_ROOT }}/test-other"
-          test "${{ steps.cache-model.outputs.cache-hit }}" = "true" || (echo "Model cache missing. Run with 'Prepare model' enabled first." && exit 1)
+
+          test "${{ steps.cache-model.outputs.cache-hit }}" = "true" || (echo "Model cache missing" && exit 1)
           test -f "${{ env.MODEL_ROOT }}/config.json"
           test -f "${{ env.MODEL_ROOT }}/vocab.json"
 
@@ -274,51 +283,170 @@ jobs:
         if: steps.cache-pyref.outputs.cache-hit != 'true'
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Restore pip cache
+      - name: Restore wheelhouse cache
         if: steps.cache-pyref.outputs.cache-hit != 'true'
-        id: cache-pip
+        id: cache-wheelhouse
         uses: actions/cache/restore@v4
         with:
-          path: ~/.cache/pip
-          key: pip-pyref-${{ runner.os }}-py311-cpu-${{ hashFiles('scripts/requirements.txt') }}
+          path: ${{ env.PY_WHEELHOUSE }}
+          key: py-wheelhouse-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-cu128-${{ hashFiles('scripts/requirements.txt', 'wav2vec2aligner-main.perf-monitoring.patch') }}
           restore-keys: |
-            pip-pyref-${{ runner.os }}-py311-cpu-
+            py-wheelhouse-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-cu128-
 
-      - name: Install Python deps (CPU-only)
+      - name: Build Python wheelhouse
+        if: steps.cache-pyref.outputs.cache-hit != 'true' && steps.cache-wheelhouse.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python -m pip install --upgrade pip
+          mkdir -p "${{ env.PY_WHEELHOUSE }}"
+
+          python -m pip download \
+            -r scripts/requirements.txt \
+            --dest "${{ env.PY_WHEELHOUSE }}" \
+            --index-url "${{ env.PYTORCH_INDEX_URL }}" \
+            --extra-index-url "${{ env.PY_EXTRA_INDEX_URL }}"
+
+      - name: Save wheelhouse cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true' && steps.cache-wheelhouse.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PY_WHEELHOUSE }}
+          key: py-wheelhouse-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-cu128-${{ hashFiles('scripts/requirements.txt', 'wav2vec2aligner-main.perf-monitoring.patch') }}
+
+      - name: Restore patched wav2vec2aligner cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        id: cache-baseline-repo
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PY_BASELINE_REPO }}
+          key: wav2vec2aligner-repo-v1-${{ hashFiles('wav2vec2aligner-main.perf-monitoring.patch') }}
+          restore-keys: |
+            wav2vec2aligner-repo-v1-
+
+      - name: Clone and patch wav2vec2aligner
+        if: steps.cache-pyref.outputs.cache-hit != 'true' && steps.cache-baseline-repo.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/EveryVoiceTTS/wav2vec2aligner.git "${{ env.PY_BASELINE_REPO }}"
+          git -C "${{ env.PY_BASELINE_REPO }}" apply ../wav2vec2aligner-main.perf-monitoring.patch
+
+      - name: Save patched wav2vec2aligner cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true' && steps.cache-baseline-repo.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.PY_BASELINE_REPO }}
+          key: wav2vec2aligner-repo-v1-${{ hashFiles('wav2vec2aligner-main.perf-monitoring.patch') }}
+
+  python-reference-run:
+    if: ${{ inputs.prepare_python_reference }}
+    name: Generate Python reference TextGrids (GPU)
+    runs-on:
+      group: gpu-runners
+      labels: ubuntu-gpu
+    needs: [python-reference-prep]
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute model cache key
+        id: model-key
+        shell: bash
+        run: |
+          raw="${{ inputs.model_source }}-${{ inputs.model_repo_id }}-${{ inputs.model_revision }}-${{ inputs.model_allow_patterns }}-${{ inputs.model_archive_url }}"
+          key="model-v1-$(echo -n "$raw" | sha256sum | head -c 32)"
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore LibriSpeech cache
+        id: cache-dataset
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.LIBRISPEECH_ROOT }}
+          key: librispeech-slr12-test-v1
+
+      - name: Restore model cache
+        id: cache-model
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.MODEL_ROOT }}
+          key: ${{ steps.model-key.outputs.key }}
+
+      - name: Restore Python reference cache
+        id: cache-pyref
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PY_REF_ROOT }}
+          key: python-ref-textgrids-v1-${{ hashFiles('scripts/wav2vec2aligner_librispeech_textgrids.py', 'wav2vec2aligner-main.perf-monitoring.patch') }}
+          restore-keys: |
+            python-ref-textgrids-v1-
+
+      - name: Restore wheelhouse cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        id: cache-wheelhouse
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PY_WHEELHOUSE }}
+          key: py-wheelhouse-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-cu128-${{ hashFiles('scripts/requirements.txt', 'wav2vec2aligner-main.perf-monitoring.patch') }}
+          restore-keys: |
+            py-wheelhouse-${{ runner.os }}-py${{ env.PYTHON_VERSION }}-cu128-
+
+      - name: Restore patched wav2vec2aligner cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        id: cache-baseline-repo
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.PY_BASELINE_REPO }}
+          key: wav2vec2aligner-repo-v1-${{ hashFiles('wav2vec2aligner-main.perf-monitoring.patch') }}
+          restore-keys: |
+            wav2vec2aligner-repo-v1-
+
+      - name: Skip if Python reference already cached
+        if: steps.cache-pyref.outputs.cache-hit == 'true'
+        run: echo "Python reference cache hit, nothing to do."
+
+      - name: Fail if required cached assets are missing
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test "${{ steps.cache-dataset.outputs.cache-hit }}" = "true" || (echo "Dataset cache missing" && exit 1)
+          test "${{ steps.cache-model.outputs.cache-hit }}" = "true" || (echo "Model cache missing" && exit 1)
+          test "${{ steps.cache-wheelhouse.outputs.cache-hit }}" = "true" || (echo "Wheelhouse cache missing; rerun prepare workflow" && exit 1)
+          test "${{ steps.cache-baseline-repo.outputs.cache-hit }}" = "true" || (echo "Patched wav2vec2aligner cache missing; rerun prepare workflow" && exit 1)
+
+      - name: Set up Python
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install Python deps from wheelhouse
         if: steps.cache-pyref.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
           python -m pip install --upgrade pip
-          pip install -r scripts/requirements.txt \
-            --index-url https://pypi.org/simple
+          python -m pip install \
+            --no-index \
+            --find-links "${{ env.PY_WHEELHOUSE }}" \
+            -r scripts/requirements.txt
 
-      - name: Save pip cache
-        if: steps.cache-pyref.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.cache/pip
-          key: pip-pyref-${{ runner.os }}-py311-cpu-${{ hashFiles('scripts/requirements.txt') }}
-
-      - name: Clone wav2vec2aligner and apply patch
+      - name: Install wav2vec2aligner baseline
         if: steps.cache-pyref.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
-          git clone --depth 1 https://github.com/EveryVoiceTTS/wav2vec2aligner.git wav2vec2aligner-main
-          git -C wav2vec2aligner-main apply ../wav2vec2aligner-main.perf-monitoring.patch
-
-      - name: Install wav2vec2aligner requirements
-        if: steps.cache-pyref.outputs.cache-hit != 'true'
-        shell: bash
-        run: |
-          set -euxo pipefail
-          if [ -f wav2vec2aligner-main/requirements.txt ]; then
-            pip install -r wav2vec2aligner-main/requirements.txt
+          if [ -f "${{ env.PY_BASELINE_REPO }}/requirements.txt" ]; then
+            python -m pip install \
+              --no-index \
+              --find-links "${{ env.PY_WHEELHOUSE }}" \
+              -r "${{ env.PY_BASELINE_REPO }}/requirements.txt"
           fi
-          pip install -e wav2vec2aligner-main
+          python -m pip install -e "${{ env.PY_BASELINE_REPO }}"
 
       - name: Generate Python reference TextGrids
         if: steps.cache-pyref.outputs.cache-hit != 'true'
@@ -329,7 +457,7 @@ jobs:
           python scripts/wav2vec2aligner_librispeech_textgrids.py \
             --dataset-root "${{ env.LIBRISPEECH_ROOT }}" \
             --output-root "${{ env.PY_REF_ROOT }}" \
-            --device cpu
+            --device cuda
 
       - name: Save Python reference cache
         if: steps.cache-pyref.outputs.cache-hit != 'true'
@@ -337,3 +465,12 @@ jobs:
         with:
           path: ${{ env.PY_REF_ROOT }}
           key: python-ref-textgrids-v1-${{ hashFiles('scripts/wav2vec2aligner_librispeech_textgrids.py', 'wav2vec2aligner-main.perf-monitoring.patch') }}
+
+      - name: Upload Python reference artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-reference-textgrids
+          path: ${{ env.PY_REF_ROOT }}
+          if-no-files-found: ignore
+          retention-days: 999
