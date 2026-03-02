@@ -16,7 +16,7 @@ on:
         description: "HF repo id (must match Prepare benchmark assets)"
         required: false
         type: string
-        default: ""
+        default: "onnx-community/wav2vec2-base-960h-ONNX"
 
       model_revision:
         description: "HF revision (must match Prepare benchmark assets)"
@@ -28,7 +28,7 @@ on:
         description: "HF allow patterns (must match Prepare benchmark assets)"
         required: false
         type: string
-        default: "*.onnx,config.json,vocab.json"
+        default: "config.json,vocab.json,onnx/model.onnx,wav2vec2-base-960h-ONNX/onnx/model.onnx"
 
       model_archive_url:
         description: "Archive URL if model_source=archive (must match Prepare benchmark assets)"

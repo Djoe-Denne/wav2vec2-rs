@@ -9,5 +9,6 @@
 --extra-index-url https://pypi.org/simple
 
 torch>=2.9.0
+torchaudio>=2.9.0
 transformers>=4.0.0
 soundfile>=0.12.1
