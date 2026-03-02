@@ -265,7 +265,7 @@ jobs:
           python scripts/wav2vec2aligner_librispeech_textgrids.py \
             --dataset-root "${{ env.LIBRISPEECH_ROOT }}" \
             --output-root "${{ env.PY_REF_ROOT }}" \
-            --device cpu
+            --device cuda
 
       - name: Save Python reference cache
         if: steps.cache-pyref.outputs.cache-hit != 'true'
