@@ -276,6 +276,16 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Restore pip cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        id: cache-pip
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-pyref-${{ runner.os }}-py311-cpu-${{ hashFiles('scripts/requirements.txt') }}
+          restore-keys: |
+            pip-pyref-${{ runner.os }}-py311-cpu-
+
       - name: Install Python deps (CUDA wheels for GPU benchmark)
         if: steps.cache-pyref.outputs.cache-hit != 'true'
         shell: bash
@@ -283,8 +293,14 @@ jobs:
           set -euxo pipefail
           python -m pip install --upgrade pip
           pip install -r scripts/requirements.txt \
-            --index-url https://download.pytorch.org/whl/cu124 \
-            --extra-index-url https://pypi.org/simple
+            --index-url https://pypi.org/simple
+
+      - name: Save pip cache
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-pyref-${{ runner.os }}-py311-cpu-${{ hashFiles('scripts/requirements.txt') }}
 
       - name: Clone wav2vec2aligner and apply patch
         if: steps.cache-pyref.outputs.cache-hit != 'true'
@@ -303,7 +319,7 @@ jobs:
           python scripts/wav2vec2aligner_librispeech_textgrids.py \
             --dataset-root "${{ env.LIBRISPEECH_ROOT }}" \
             --output-root "${{ env.PY_REF_ROOT }}" \
-            --device cuda
+            --device cpu
 
       - name: Save Python reference cache
         if: steps.cache-pyref.outputs.cache-hit != 'true'
