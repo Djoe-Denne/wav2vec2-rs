@@ -310,6 +310,16 @@ jobs:
           git clone --depth 1 https://github.com/EveryVoiceTTS/wav2vec2aligner.git wav2vec2aligner-main
           git -C wav2vec2aligner-main apply ../wav2vec2aligner-main.perf-monitoring.patch
 
+      - name: Install wav2vec2aligner requirements
+        if: steps.cache-pyref.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          if [ -f wav2vec2aligner-main/requirements.txt ]; then
+            pip install -r wav2vec2aligner-main/requirements.txt
+          fi
+          pip install -e wav2vec2aligner-main
+
       - name: Generate Python reference TextGrids
         if: steps.cache-pyref.outputs.cache-hit != 'true'
         shell: bash
