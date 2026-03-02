@@ -286,7 +286,7 @@ jobs:
           restore-keys: |
             pip-pyref-${{ runner.os }}-py311-cpu-
 
-      - name: Install Python deps (CUDA wheels for GPU benchmark)
+      - name: Install Python deps (CPU-only)
         if: steps.cache-pyref.outputs.cache-hit != 'true'
         shell: bash
         run: |
