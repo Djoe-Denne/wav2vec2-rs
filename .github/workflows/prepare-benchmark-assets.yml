@@ -224,9 +224,17 @@ jobs:
     if: ${{ inputs.prepare_python_reference }}
     name: Prepare Python reference TextGrids
     runs-on: ubuntu-latest
-    needs: [dataset]
+    needs: [dataset, model]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute model cache key
+        id: model-key
+        shell: bash
+        run: |
+          raw="${{ inputs.model_source }}-${{ inputs.model_repo_id }}-${{ inputs.model_revision }}-${{ inputs.model_allow_patterns }}-${{ inputs.model_archive_url }}"
+          key="model-v1-$(echo -n "$raw" | sha256sum | head -c 32)"
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
 
       - name: Restore LibriSpeech cache
         id: cache-dataset
@@ -235,13 +243,23 @@ jobs:
           path: ${{ env.LIBRISPEECH_ROOT }}
           key: librispeech-slr12-test-v1
 
-      - name: Fail if dataset is missing
+      - name: Restore model cache
+        id: cache-model
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.MODEL_ROOT }}
+          key: ${{ steps.model-key.outputs.key }}
+
+      - name: Fail if dataset or model is missing
         shell: bash
         run: |
           set -euxo pipefail
           test "${{ steps.cache-dataset.outputs.cache-hit }}" = "true"
           test -d "${{ env.LIBRISPEECH_ROOT }}/test-clean"
           test -d "${{ env.LIBRISPEECH_ROOT }}/test-other"
+          test "${{ steps.cache-model.outputs.cache-hit }}" = "true" || (echo "Model cache missing. Run with 'Prepare model' enabled first." && exit 1)
+          test -f "${{ env.MODEL_ROOT }}/config.json"
+          test -f "${{ env.MODEL_ROOT }}/vocab.json"
 
       - name: Restore Python reference cache
         id: cache-pyref
