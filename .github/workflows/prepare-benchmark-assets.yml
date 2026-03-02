@@ -193,7 +193,9 @@ jobs:
           set -euxo pipefail
           test -f "${{ env.MODEL_ROOT }}/config.json"
           test -f "${{ env.MODEL_ROOT }}/vocab.json"
-          find "${{ env.MODEL_ROOT }}" -maxdepth 1 \( -name "*.onnx" -o -name "*.safetensors" \) | grep -q .
+          # Allow weight files at any depth (HF may use a subdirectory)
+          count=$(find "${{ env.MODEL_ROOT }}" \( -name "*.onnx" -o -name "*.safetensors" \) 2>/dev/null | wc -l)
+          test "$count" -gt 0 || (echo "No .onnx or .safetensors under ${{ env.MODEL_ROOT }}" && exit 1)
 
       - name: Save model cache
         if: steps.cache-model.outputs.cache-hit != 'true'

@@ -56,9 +56,44 @@ Memory profiling captures GPU device memory usage (`cudaMemGetInfo` on both side
 
 Benchmark data (LibriSpeech, Python reference TextGrids, and the model) are prepared and cached by manual workflows so that GPU benchmarks can run without re-downloading on every run.
 
+### How to trigger the workflows
+
+Both workflows use **manual dispatch** (`workflow_dispatch`). They do not run on push or pull request.
+
+**In the GitHub web UI:**
+
+1. Open your repo on GitHub.
+2. Go to the **Actions** tab.
+3. In the left sidebar, click **Prepare benchmark assets** or **GPU manual (benchmark)**.
+4. Click the **Run workflow** dropdown (top right).
+5. Choose the branch to run on (usually `main`), set the inputs (checkboxes and model options), then click the green **Run workflow** button.
+
+**From the command line** (GitHub CLI):
+
+```bash
+# Prepare all three caches (dataset, model, Python reference)
+gh workflow run "Prepare benchmark assets" --ref main \
+  -f prepare_dataset=true \
+  -f prepare_python_reference=true \
+  -f prepare_model=true \
+  -f model_source=hf \
+  -f model_repo_id=your-org/your-model \
+  -f model_revision=main \
+  -f model_allow_patterns="*.onnx,config.json,vocab.json"
+
+# After caches are ready, run the GPU benchmark
+gh workflow run "GPU manual (benchmark)" --ref main \
+  -f model_source=hf \
+  -f model_repo_id=your-org/your-model \
+  -f model_revision=main \
+  -f model_allow_patterns="*.onnx,config.json,vocab.json"
+```
+
+Replace `your-org/your-model` and the branch name as needed. The model inputs must match between the two runs so the same cache key is used.
+
 ### 1. Prepare benchmark assets
 
-Run the **Prepare benchmark assets** workflow (`Actions → Prepare benchmark assets → Run workflow`) to populate caches:
+Run the **Prepare benchmark assets** workflow to populate caches:
 
 - **LibriSpeech** — Downloads test-clean and test-other from OpenSLR 12 into `test-data/LibriSpeech` (cache key: `librispeech-slr12-test-v1`).
 - **Python reference TextGrids** — Generates reference alignments with wav2vec2aligner and stores them under `ci-assets/python-reference-textgrids` (cache key includes script + patch hash).
