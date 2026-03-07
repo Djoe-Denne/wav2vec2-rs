@@ -25,6 +25,107 @@ Extract under `test-data/LibriSpeech/test-clean` and `test-data/LibriSpeech/test
 
 ---
 
+## Multilingual and other test data
+
+Additional benchmark data can be placed under **`test-data/`** using the same layout as LibriSpeech: a dataset-specific folder containing **subset folders**, each with `*.trans.txt` (format: `utt_id transcript`) and `{utt_id}.flac` (or `.wav`) audio files. This allows the same benchmark tooling to run on multilingual or accent-specific corpora.
+
+### VoxPopuli (transcribed ASR, per language)
+
+**Source:** [facebookresearch/voxpopuli](https://github.com/facebookresearch/voxpopuli) (repository archived; instructions still valid).
+
+VoxPopuli provides transcribed speech for 16 languages (e.g. English, German, French, Spanish, Polish, Italian, Romanian, Hungarian, Czech, Dutch, Finnish, Croatian, Slovak, Slovene, Estonian, Lithuanian). Data is European Parliament recordings (2009–2020).
+
+**Download steps (per language code, e.g. `en`, `de`, `fr`):**
+
+1. Clone the repo and install dependencies:
+   ```bash
+   git clone https://github.com/facebookresearch/voxpopuli.git
+   cd voxpopuli
+   pip install -r requirements.txt
+   ```
+
+2. Download raw ASR audios (shared across languages):
+   ```bash
+   python -m voxpopuli.download_audios --root [ROOT] --subset asr
+   ```
+   By default this downloads all years (2009–2020). To download only the latest year (much smaller, one archive):
+   ```bash
+   python -m voxpopuli.download_audios --root [ROOT] --subset asr --years latest
+   ```
+   This saves to `[ROOT]/raw_audios/original/[year]/[recording_id].ogg`.
+
+3. Segment and align for a specific language:
+   ```bash
+   python -m voxpopuli.get_asr_data --root [ROOT] --lang [LANGUAGE]
+   ```
+   Output:
+   - Audios: `[ROOT]/transcribed_data/[language]/[year]/[segment_id].ogg`
+   - Manifests: `[ROOT]/transcribed_data/[language]/asr_train.tsv`, `asr_dev.tsv`, `asr_test.tsv` (columns: ID, transcript, speaker ID).
+
+VoxPopuli uses **Ogg** and **TSV**, not the `.trans.txt` + `.flac` layout. To use it with the same benchmark tooling, convert the TSV manifests and Ogg files into subset dirs under `test-data/VoxPopuli/<lang>/<split>/` with `.trans.txt` and `.flac` (e.g. resample to 16 kHz and write one `.trans.txt` per split and one `{id}.flac` per utterance). Use the script **`scripts/convert_voxpopuli_to_librispeech_layout.py`** after running the voxpopuli download and segment steps: `--voxpopuli-root [ROOT] --lang fr --output-dir test-data`. Note: the VoxPopuli repo is archived and its `download_audios` script may require an older `torchaudio` (e.g. `download_url` was removed in newer versions); you may need to patch it or use a separate downloader for the ASR tarballs.
+
+**Target layout under test-data:** `test-data/VoxPopuli/<lang>/<split>/` (e.g. `train`, `dev`, `test`) with `.trans.txt` and `{id}.flac` after conversion.
+
+### Multilingual LibriSpeech (Hugging Face)
+
+**Source:** [facebook/multilingual_librispeech](https://huggingface.co/datasets/facebook/multilingual_librispeech).
+
+Configs: `dutch`, `french`, `german`, `italian`, `polish`, `portuguese`, `spanish`. Splits: `train`, `dev`, `test`, `1_hours`, `9_hours`.
+
+**Download via API:**
+```python
+from datasets import load_dataset
+ds = load_dataset("facebook/multilingual_librispeech", "<config>", split="<split>")
+# Example: load_dataset("facebook/multilingual_librispeech", "german", split="test")
+```
+
+**Conversion to LibriSpeech-like layout:** Use the script `scripts/export_hf_to_librispeech_layout.py` (see below). It writes `test-data/MultilingualLibriSpeech/<config>/<split>/` with `.trans.txt` and `{id}.flac` (16 kHz, mono).
+
+### African Accented French (Hugging Face)
+
+**Source:** [gigant/african_accented_french](https://huggingface.co/datasets/gigant/african_accented_french).
+
+~22 hours of French speech (Cameroon, Gabon, Niger). Splits: `train`, `test`.
+
+**Download via API:**
+```python
+from datasets import load_dataset
+ds = load_dataset("gigant/african_accented_french", split="train")  # or "test"
+```
+
+**Conversion to LibriSpeech-like layout:** Use the same script `scripts/export_hf_to_librispeech_layout.py`. It writes `test-data/AfricanAccentedFrench/train/` and `test-data/AfricanAccentedFrench/test/` with `.trans.txt` and `{id}.flac`.
+
+### Export script for Hugging Face datasets (de-parquet)
+
+The script **`scripts/export_hf_to_librispeech_layout.py`** loads a Hugging Face dataset (e.g. Multilingual LibriSpeech or African Accented French) and exports it into the same layout as LibriSpeech under `test-data/`:
+
+- **Multilingual LibriSpeech:** `--dataset facebook/multilingual_librispeech --config <lang> --splits test --output-dir test-data` → `test-data/MultilingualLibriSpeech/<config>/test/`.
+- **African Accented French:** `--dataset gigant/african_accented_french --splits test --output-dir test-data --trust-remote-code` → `test-data/AfricanAccentedFrench/test/`.
+
+See the script’s `--help` and docstring for options (`--output-dir`, `--limit`, etc.). Dependencies: `datasets`, `soundfile`, `librosa` (for audio decode with datasets 3.x); use a venv and `pip install datasets soundfile librosa scipy`.
+
+### Recreating test data (after deleting)
+
+If you delete all benchmark data and want to recreate it from scratch:
+
+1. **LibriSpeech (English):** Download test-clean and test-other from [OpenSLR 12](https://www.openslr.org/12), extract so you have `test-data/LibriSpeech/test-clean` and `test-data/LibriSpeech/test-other`.
+
+2. **Multilingual LibriSpeech (e.g. French test):**
+   ```bash
+   python scripts/export_hf_to_librispeech_layout.py --dataset facebook/multilingual_librispeech --config french --splits test --output-dir test-data
+   ```
+   Output: `test-data/MultilingualLibriSpeech/french/test/`.
+
+3. **African Accented French (test):**
+   ```bash
+   python scripts/export_hf_to_librispeech_layout.py --dataset gigant/african_accented_french --splits test --output-dir test-data --trust-remote-code
+   ```
+   Output: `test-data/AfricanAccentedFrench/test/`.
+
+4. **VoxPopuli (e.g. French):** Follow the VoxPopuli subsection above (clone repo, `download_audios --subset asr`, `get_asr_data --lang fr`; note torchaudio compatibility). Then run `scripts/convert_voxpopuli_to_librispeech_layout.py --voxpopuli-root [ROOT] --lang fr --output-dir test-data`.
+
+---
+
 ## What is measured
 
 ### Timing stages
@@ -133,6 +234,29 @@ cargo run --release --features "onnx,cuda-dp,alignment-profiling,report-cli" \
 ```
 
 For CPU-only benchmarks, use `--device cpu` and drop the `cuda-dp` feature. For the wgpu backend, use `--features "onnx,wgpu-dp,alignment-profiling,report-cli"`.
+
+### Rust TextGrid-only (classic mode)
+
+To generate TextGrid files once (no perf measurement), use `--output-format textgrid` and an optional suffix so outputs do not overwrite existing TextGrids (e.g. from the Python aligner):
+
+```bash
+# Build (no alignment-profiling needed)
+cargo build --release --bin alignment_report --features "onnx,report-cli"
+
+# African Accented French — writes e.g. test_000000_rust.TextGrid
+cargo run --release --bin alignment_report --features "onnx,report-cli" -- \
+  --model-dir models/onnx_wav2vec2_base_960h \
+  --dataset-root test-data/AfricanAccentedFrench \
+  --output-format textgrid --textgrid-suffix _rust --device cpu --runtime onnx
+
+# Multilingual LibriSpeech French — writes e.g. 10179_11051_000000_rust.TextGrid
+cargo run --release --bin alignment_report --features "onnx,report-cli" -- \
+  --model-dir models/onnx_wav2vec2_base_960h \
+  --dataset-root test-data/MultilingualLibrispeech/french \
+  --output-format textgrid --textgrid-suffix _rust --device cpu --runtime onnx
+```
+
+Requires ONNX Runtime ≥ 1.23 (the `ort` crate will report a version mismatch if an older system DLL is loaded).
 
 ### Python benchmark
 

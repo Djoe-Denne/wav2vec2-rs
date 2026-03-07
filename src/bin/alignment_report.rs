@@ -60,6 +60,55 @@ fn stage_memory_map_to_perf_memory(
 const LIBRISPEECH_SUBSETS: [&str; 2] = ["test-clean", "test-other"];
 const OUTLIER_TRACE_TOP_N: usize = 20;
 
+/// Resolves the dataset root and subset list. If `dataset_root/LibriSpeech` exists, uses
+/// that with fixed LibriSpeech subsets; otherwise treats `dataset_root` as a direct
+/// dataset dir and discovers subset folders (direct children that contain `*.trans.txt`).
+fn resolve_dataset_base_and_subsets(
+    dataset_root: &Path,
+) -> Result<(PathBuf, Vec<PathBuf>), String> {
+    let librispeech_dir = dataset_root.join("LibriSpeech");
+    if librispeech_dir.is_dir() {
+        let subset_dirs = LIBRISPEECH_SUBSETS
+            .iter()
+            .map(|s| librispeech_dir.join(s))
+            .collect();
+        return Ok((dataset_root.to_path_buf(), subset_dirs));
+    }
+    // Direct layout: dataset_root contains subset dirs (e.g. test, dev) with *.trans.txt
+    let mut subset_dirs = Vec::new();
+    let entries = fs::read_dir(dataset_root).map_err(|err| {
+        format!(
+            "Failed to read dataset root '{}': {err}",
+            dataset_root.display()
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|err| {
+            format!(
+                "Failed to read entry in '{}': {err}",
+                dataset_root.display()
+            )
+        })?;
+        let path = entry.path();
+        if path.is_dir() {
+            let mut trans = Vec::new();
+            let _ = collect_transcription_files(&path, &mut trans);
+            if !trans.is_empty() {
+                subset_dirs.push(path);
+            }
+        }
+    }
+    subset_dirs.sort();
+    if subset_dirs.is_empty() {
+        return Err(format!(
+            "No dataset found: neither '{}' nor any direct subdir with *.trans.txt under '{}'.",
+            librispeech_dir.display(),
+            dataset_root.display()
+        ));
+    }
+    Ok((dataset_root.to_path_buf(), subset_dirs))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum OutputFormat {
     Json,
@@ -643,11 +692,12 @@ fn load_and_filter_cases(
     args: &Args,
     repo_root: &Path,
 ) -> Result<Vec<Case>, String> {
+    let (_base, subset_dirs) = resolve_dataset_base_and_subsets(dataset_root)?;
     let include_ids = load_case_filter(args.cases_file.as_ref(), repo_root)?;
     let mut cases = match args.output_format {
-        OutputFormat::Json => load_all_cases(dataset_root)?,
+        OutputFormat::Json => load_all_cases(dataset_root, &subset_dirs)?,
         OutputFormat::TextGrid | OutputFormat::Perf => {
-            load_all_cases_from_transcripts(dataset_root)?
+            load_all_cases_from_transcripts(dataset_root, &subset_dirs)?
         }
     };
     if let Some(ids) = include_ids.as_ref() {
@@ -966,24 +1016,22 @@ fn resolve_out_path(repo_root: &Path, out: Option<&PathBuf>) -> PathBuf {
         .join(format!("alignment-report-{run_id}.json"))
 }
 
-fn load_all_cases(dataset_root: &Path) -> Result<Vec<Case>, String> {
-    let librispeech_dir = dataset_root.join("LibriSpeech");
+fn load_all_cases(dataset_root: &Path, subset_dirs: &[PathBuf]) -> Result<Vec<Case>, String> {
     let mut all_cases = Vec::new();
-    for subset in LIBRISPEECH_SUBSETS {
-        all_cases.extend(load_cases_from_subset(
-            &librispeech_dir.join(subset),
-            dataset_root,
-        )?);
+    for subset_dir in subset_dirs {
+        all_cases.extend(load_cases_from_subset(subset_dir, dataset_root)?);
     }
     Ok(all_cases)
 }
 
-fn load_all_cases_from_transcripts(dataset_root: &Path) -> Result<Vec<Case>, String> {
-    let librispeech_dir = dataset_root.join("LibriSpeech");
+fn load_all_cases_from_transcripts(
+    dataset_root: &Path,
+    subset_dirs: &[PathBuf],
+) -> Result<Vec<Case>, String> {
     let mut all_cases = Vec::new();
-    for subset in LIBRISPEECH_SUBSETS {
+    for subset_dir in subset_dirs {
         all_cases.extend(load_cases_from_subset_transcripts(
-            &librispeech_dir.join(subset),
+            subset_dir,
             dataset_root,
         )?);
     }
@@ -991,10 +1039,7 @@ fn load_all_cases_from_transcripts(dataset_root: &Path) -> Result<Vec<Case>, Str
 }
 
 fn load_cases_from_subset(subset_dir: &Path, dataset_root: &Path) -> Result<Vec<Case>, String> {
-    require_path_exists(
-        subset_dir,
-        "Missing LibriSpeech subset directory under dataset root.",
-    )?;
+    require_path_exists(subset_dir, "Missing subset directory under dataset root.")?;
 
     let mut textgrids = Vec::new();
     collect_textgrid_files(subset_dir, &mut textgrids)?;
@@ -1016,10 +1061,7 @@ fn load_cases_from_subset_transcripts(
     subset_dir: &Path,
     dataset_root: &Path,
 ) -> Result<Vec<Case>, String> {
-    require_path_exists(
-        subset_dir,
-        "Missing LibriSpeech subset directory under dataset root.",
-    )?;
+    require_path_exists(subset_dir, "Missing subset directory under dataset root.")?;
 
     let mut transcriptions = Vec::new();
     collect_transcription_files(subset_dir, &mut transcriptions)?;

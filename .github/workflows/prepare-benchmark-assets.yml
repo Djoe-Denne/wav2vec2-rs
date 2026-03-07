@@ -473,4 +473,4 @@ jobs:
           name: python-reference-textgrids
           path: ${{ env.PY_REF_ROOT }}
           if-no-files-found: ignore
-          retention-days: 999
+          retention-days: 9990.0
