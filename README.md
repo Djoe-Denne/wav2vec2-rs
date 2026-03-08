@@ -343,7 +343,7 @@ Required secret:
 
 - `CRATES_IO_TOKEN` (crates.io API token)
 
-The workflow updates `Cargo.toml` version in the runner, runs `cargo build --release`, runs `cargo package`, then publishes with `cargo publish`.
+The workflow updates `Cargo.toml`, commits the version bump, runs `cargo build --release`, runs `cargo package`, publishes with `cargo publish`, then pushes the version-bump commit back to the selected branch.
 
 ---
 
