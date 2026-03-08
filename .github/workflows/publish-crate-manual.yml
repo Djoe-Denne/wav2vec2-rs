@@ -2,95 +2,30 @@ name: Publish crate (manual)
 
 on:
   workflow_dispatch:
-    inputs:
-      new_version:
-        description: "New crate version (example: 0.2.0)"
-        required: true
-        type: string
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   publish:
-    name: Build, package, and publish
+    name: Package and publish
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate semver input
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${{ inputs.new_version }}"
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid version: '$version'. Expected SemVer (e.g. 1.2.3 or 1.2.3-rc.1)."
-            exit 1
-          fi
 
       - uses: dtolnay/rust-toolchain@stable
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Update version in Cargo.toml
-        shell: bash
-        env:
-          NEW_VERSION: ${{ inputs.new_version }}
-        run: |
-          set -euo pipefail
-          python - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          path = Path("Cargo.toml")
-          text = path.read_text(encoding="utf-8")
-          lines = text.splitlines()
-          in_package = False
-          replaced = False
-          out = []
-
-          for line in lines:
-            stripped = line.strip()
-            if stripped == "[package]":
-              in_package = True
-            elif stripped.startswith("[") and stripped != "[package]":
-              in_package = False
-
-            if in_package and not replaced and re.match(r'^version\s*=\s*"[^"]+"$', stripped):
-              out.append(f'version = "{os.environ["NEW_VERSION"]}"')
-              replaced = True
-            else:
-              out.append(line)
-
-          if not replaced:
-            raise SystemExit("Failed to update [package].version in Cargo.toml")
-
-          path.write_text("\n".join(out) + "\n", encoding="utf-8")
-          PY
-
-      - name: Show updated package metadata
+      - name: Show package version
         shell: bash
         run: |
           set -euo pipefail
           awk '
-            /^\[package\]/ {in_pkg=1; print; next}
+            /^\[package\]/ {in_pkg=1; next}
             /^\[/ && $0 != "[package]" {if (in_pkg) exit}
-            in_pkg {print}
+            in_pkg && /^version/ {print; exit}
           ' Cargo.toml
-
-      - name: Commit version bump
-        shell: bash
-        run: |
-          set -euo pipefail
-          if git diff --quiet -- Cargo.toml; then
-            echo "No version change detected in Cargo.toml."
-            exit 1
-          fi
-          git add Cargo.toml
-          git -c user.name="github-actions[bot]" \
-            -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-            commit -m "chore(release): bump crate version to ${{ inputs.new_version }}"
 
       - name: Build crate
         run: cargo build --release
@@ -102,9 +37,3 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: cargo publish
-
-      - name: Push version bump commit
-        shell: bash
-        run: |
-          set -euo pipefail
-          git push origin "HEAD:${GITHUB_REF_NAME}"

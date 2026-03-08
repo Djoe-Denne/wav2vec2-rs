@@ -347,15 +347,15 @@ If you add CI (e.g. GitHub Actions), run these three steps as blocking jobs.
 
 A manual GitHub Action is available at `.github/workflows/publish-crate-manual.yml`.
 
-Use **Actions → Publish crate (manual) → Run workflow** and provide:
+**Assume the version bump is already committed** on the branch you run from (branch protection may prevent the action from pushing). The workflow only builds, packages, and publishes:
 
-- `new_version` (for example `0.2.0`)
+- **Actions → Publish crate (manual) → Run workflow** (no inputs)
 
 Required secret:
 
 - `CRATES_IO_TOKEN` (crates.io API token)
 
-The workflow updates `Cargo.toml`, commits the version bump, runs `cargo build --release`, runs `cargo package`, publishes with `cargo publish`, then pushes the version-bump commit back to the selected branch.
+The workflow runs `cargo build --release`, `cargo package`, and `cargo publish`.
 
 ---
 
