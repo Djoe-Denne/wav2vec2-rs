@@ -81,7 +81,7 @@ cargo build --release --features "onnx,cuda-dp,alignment-profiling"
 ### As a library
 
 ```rust
-use wav2vec2_align::{ForcedAlignerBuilder, Wav2Vec2Config, AlignmentInput};
+use wav2vec2_rs::{ForcedAlignerBuilder, Wav2Vec2Config, AlignmentInput};
 
 let config = Wav2Vec2Config {
     model_path: "model.safetensors".into(), // or "model.onnx"
@@ -108,6 +108,18 @@ for word in &output.words {
         word.word, word.start_ms, word.end_ms,
         word.confidence.unwrap_or(0.0));
 }
+```
+
+### Examples
+
+Runnable examples are in the `examples/` directory:
+
+- **[examples/build_default.rs](examples/build_default.rs)** — Build with all defaults (Candle runtime, default tokenizer, Viterbi aligner, default word grouper). Update paths to your model files and 16 kHz mono audio to run.
+- **[examples/custom_builder_components.rs](examples/custom_builder_components.rs)** — Build with custom injected components: a mock runtime backend, custom tokenizer, and custom word grouper. Runs without real model files.
+
+```bash
+cargo run --example build_default      # requires model + config + vocab paths
+cargo run --example custom_builder_components
 ```
 
 ### Alignment report CLI (benchmark binary)
