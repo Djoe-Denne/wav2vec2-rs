@@ -2,6 +2,14 @@
 name = "wav2vec2-rs"
 version = "0.1.0"
 edition = "2021"
+description = "Rust wav2vec2 CTC forced alignment with CPU, wgpu, and CUDA backends."
+readme = "README.md"
+license = "MPL-2.0"
+repository = "https://github.com/Djoe-Denne/wav2vec2-rs"
+homepage = "https://github.com/Djoe-Denne/wav2vec2-rs"
+documentation = "https://docs.rs/wav2vec2-rs"
+keywords = ["wav2vec2", "ctc", "forced-alignment", "speech", "asr"]
+categories = ["algorithms", "multimedia::audio", "command-line-utilities"]
 
 [dependencies]
 candle-core = "0.9.1"

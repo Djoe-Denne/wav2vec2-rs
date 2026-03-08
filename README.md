@@ -331,6 +331,20 @@ Optional **pre-commit hooks** (format + clippy) are in `githooks/`. Enable with 
 
 If you add CI (e.g. GitHub Actions), run these three steps as blocking jobs.
 
+### Manual crate publish workflow
+
+A manual GitHub Action is available at `.github/workflows/publish-crate-manual.yml`.
+
+Use **Actions → Publish crate (manual) → Run workflow** and provide:
+
+- `new_version` (for example `0.2.0`)
+
+Required secret:
+
+- `CRATES_IO_TOKEN` (crates.io API token)
+
+The workflow updates `Cargo.toml` version in the runner, runs `cargo build --release`, runs `cargo package`, then publishes with `cargo publish`.
+
 ---
 
 ## License
