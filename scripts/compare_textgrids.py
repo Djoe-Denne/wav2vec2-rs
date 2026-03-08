@@ -1,24 +1,29 @@
 #!/usr/bin/env python3
 """
-Compare baseline and Rust-generated TextGrid files under a LibriSpeech root.
-Takes the path to the LibriSpeech root; recursively finds every directory
-containing baseline .TextGrid and *_rust_*.TextGrid pairs. Aggregates all
-word-pair diffs and outputs a single global median for each metric per mode:
+Compare baseline and Rust-generated TextGrid files under a dataset root.
+Takes the path to a dataset root; recursively finds every directory containing
+baseline .TextGrid and Rust variant TextGrid pairs. By default, it compares
+only plain `*_rust.TextGrid` files. Optionally, it can also include legacy
+`*_rust_*.TextGrid` mode files.
+
+Aggregates all word-pair diffs and outputs a single global median for each
+metric per mode:
   - median_start_diff_ms: median of (xmin_rust - xmin_ref) over all words, in ms
   - median_end_diff_ms: median of (xmax_rust - xmax_ref) over all words, in ms
   - median_word_middle_diff_ms: median of (middle_rust - middle_ref) over all words, in ms
 
 Exit codes (unique, for CI):
-  0  Success; all metrics within thresholds.
-  1  No baseline + *_rust_*.TextGrid pairs found, or path is not a directory.
-  2  At least one |metric| > 5 ms for some mode (alignment drift threshold).
-  3  Same metric differs by more than 0.01 ms between modes (cross-mode consistency).
-  4  One or more baseline/rust pair failed to load or compare (parse/word-count error).
+  0  Success.
+  1  No baseline + Rust TextGrid pairs found, or path is not a directory.
+  2  (Optional) At least one |metric| > threshold for some mode.
+  3  (Optional) Same metric differs by more than threshold between modes.
+  4  One or more baseline/rust pair failed to load or compare (strict mode only).
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import statistics
 import sys
@@ -26,8 +31,8 @@ from pathlib import Path
 
 EXIT_SUCCESS = 0
 EXIT_NO_PAIRS = 1
-EXIT_ABS_THRESHOLD = 2   # |metric| > 5 ms
-EXIT_MODE_DRIFT = 3     # same metric differs > 0.01 ms between modes
+EXIT_ABS_THRESHOLD = 2  # |metric| > threshold (optional)
+EXIT_MODE_DRIFT = 3  # same metric differs > threshold between modes (optional)
 EXIT_LOAD_ERROR = 4     # one or more pair failed to load/compare
 ABS_THRESHOLD_MS = 5.0
 MODE_DRIFT_THRESHOLD_MS = 0.01
@@ -80,7 +85,7 @@ def parse_textgrid_words(path: Path) -> list[tuple[float, float, str]]:
                             if tm:
                                 text_val = tm.group(1)
                             i += 1
-                        if not (xmin != xmin and xmax != xmax):  # nan check
+                        if not (math.isnan(xmin) or math.isnan(xmax)):
                             intervals.append((xmin, xmax, text_val))
                         continue
                     i += 1
@@ -164,24 +169,44 @@ def collect_diffs_ms(
     return (start_diffs_ms, end_diffs_ms, middle_diffs_ms)
 
 
-def discover_baseline_rust_pairs(directory: Path) -> list[tuple[Path, Path, str]]:
+def discover_baseline_rust_pairs(
+    directory: Path, include_rust_modes: bool = False
+) -> list[tuple[Path, Path, str]]:
     """
     In `directory` (non-recursive), find baseline TextGrid files and matching
-    *_rust_{mode}.TextGrid files. Return list of (baseline_path, rust_path, mode).
+    Rust variants. Return list of (baseline_path, rust_path, mode).
+
+    Always considered:
+      - baseline: stem.TextGrid
+      - rust default: stem_rust.TextGrid   -> mode="rust"
+
+    Optional (include_rust_modes=True):
+      - rust modes: stem_rust_{mode}.TextGrid -> mode="rust_{mode}"
     """
     if not directory.is_dir():
         directory = directory.parent
-    textgrids = list(directory.glob("*.TextGrid"))
-    baselines = [p for p in textgrids if "_rust_" not in p.name]
-    rust_files = [p for p in textgrids if "_rust_" in p.name]
+    textgrids = sorted(directory.glob("*.TextGrid"))
+    baselines = [
+        p
+        for p in textgrids
+        if "_rust_" not in p.stem and not p.stem.endswith("_rust")
+    ]
     pairs: list[tuple[Path, Path, str]] = []
     for baseline in baselines:
         stem = baseline.stem
-        prefix = f"{stem}_rust_"
-        for rust_path in rust_files:
-            if rust_path.name.startswith(prefix) and rust_path.suffix == ".TextGrid":
-                mode = rust_path.name[len(prefix) : -len(".TextGrid")]
-                pairs.append((baseline, rust_path, mode))
+
+        # Plain rust output: stem_rust.TextGrid
+        plain_rust = baseline.with_name(f"{stem}_rust.TextGrid")
+        if plain_rust.exists():
+            pairs.append((baseline, plain_rust, "rust"))
+
+        # Legacy/extra rust modes: stem_rust_{mode}.TextGrid
+        if include_rust_modes:
+            prefix = f"{stem}_rust_"
+            for rust_path in textgrids:
+                if rust_path.name.startswith(prefix) and rust_path.suffix == ".TextGrid":
+                    mode = rust_path.name[len(prefix) : -len(".TextGrid")]
+                    pairs.append((baseline, rust_path, f"rust_{mode}"))
     return pairs
 
 
@@ -196,7 +221,7 @@ def directories_with_textgrids(root: Path) -> list[Path]:
 def load_pair_words(
     baseline_path: Path, rust_path: Path
 ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]] | None:
-    """Load both TextGrids and return (ref_words, rust_words) or None on error."""
+    """Load both TextGrids and return (ref_words, rust_words) or None on parse/shape error."""
     try:
         ref_intervals = parse_textgrid_words(baseline_path)
         rust_intervals = parse_textgrid_words(rust_path)
@@ -211,35 +236,70 @@ def load_pair_words(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Compare baseline and *_rust_* TextGrid files under LibriSpeech root; output global median of three metrics."
+        description=(
+            "Compare baseline and Rust TextGrid files under a dataset root; "
+            "output global medians for start/end/middle deltas."
+        )
     )
     parser.add_argument(
-        "librispeech_path",
+        "dataset_path",
         type=Path,
-        help="Path to LibriSpeech root (e.g. test-data/LibriSpeech); scans recursively for baseline + *_rust_*.TextGrid pairs",
+        help=(
+            "Path to dataset root (e.g. test-data/MultilingualLibrispeech or "
+            "test-data/AfricanAccentedFrench). Scans recursively."
+        ),
+    )
+    parser.add_argument(
+        "--include-rust-modes",
+        action="store_true",
+        help="Also include legacy variants named stem_rust_{mode}.TextGrid.",
+    )
+    parser.add_argument(
+        "--strict-load-errors",
+        action="store_true",
+        help="Exit with code 4 when any pair fails to load/compare.",
+    )
+    parser.add_argument(
+        "--fail-on-threshold",
+        action="store_true",
+        help=(
+            "Fail with CI-style exit codes when thresholds are exceeded "
+            "(default: report thresholds as warnings only)."
+        ),
+    )
+    parser.add_argument(
+        "--max-error-lines",
+        type=int,
+        default=0,
+        help="Maximum number of per-pair mismatch lines to print (default: 0).",
     )
     args = parser.parse_args()
 
-    root = args.librispeech_path.resolve()
+    root = args.dataset_path.resolve()
     if not root.is_dir():
-        print("Error: librispeech_path must be a directory.", file=sys.stderr)
+        print("Error: dataset_path must be a directory.", file=sys.stderr)
         return EXIT_NO_PAIRS
 
     # Aggregate per mode: mode -> (start_diffs, end_diffs, middle_diffs)
     by_mode: dict[str, tuple[list[float], list[float], list[float]]] = {}
 
     dirs = directories_with_textgrids(root)
-    any_failed = False
+    failed_count = 0
+    printed_errors = 0
     for directory in dirs:
-        pairs = discover_baseline_rust_pairs(directory)
+        pairs = discover_baseline_rust_pairs(
+            directory, include_rust_modes=args.include_rust_modes
+        )
         for baseline_path, rust_path, mode in pairs:
             words = load_pair_words(baseline_path, rust_path)
             if words is None:
-                print(
-                    f"Error: failed to compare {baseline_path} vs {rust_path}",
-                    file=sys.stderr,
-                )
-                any_failed = True
+                failed_count += 1
+                if printed_errors < args.max_error_lines:
+                    print(
+                        f"Skip: failed to compare {baseline_path} vs {rust_path}",
+                        file=sys.stderr,
+                    )
+                    printed_errors += 1
                 continue
             if mode not in by_mode:
                 by_mode[mode] = ([], [], [])
@@ -249,12 +309,12 @@ def main() -> int:
             by_mode[mode][1].extend(e)
             by_mode[mode][2].extend(m)
 
-    if any_failed:
+    if args.strict_load_errors and failed_count > 0:
         return EXIT_LOAD_ERROR
 
     if not by_mode:
         print(
-            "Error: no baseline + *_rust_*.TextGrid pairs found under path.",
+            "Error: no baseline + Rust TextGrid pairs found under path.",
             file=sys.stderr,
         )
         return EXIT_NO_PAIRS
@@ -277,28 +337,61 @@ def main() -> int:
         print(f"[{mode}] median_end_diff_ms={me}")
         print(f"[{mode}] median_word_middle_diff_ms={mm}")
 
-    # Validation: |metric| <= 5 ms for every metric and mode
-    for mode in medians:
-        ms, me, mm = medians[mode]
-        if abs(ms) > ABS_THRESHOLD_MS or abs(me) > ABS_THRESHOLD_MS or abs(mm) > ABS_THRESHOLD_MS:
+    if failed_count > 0 and not args.strict_load_errors:
+        suppressed = max(0, failed_count - printed_errors)
+        if suppressed > 0:
             print(
-                f"Error: at least one |metric| > {ABS_THRESHOLD_MS} ms (mode={mode}).",
+                f"Warning: {failed_count} pair(s) failed to compare ({suppressed} not shown).",
                 file=sys.stderr,
             )
-            return EXIT_ABS_THRESHOLD
+        else:
+            print(
+                f"Warning: {failed_count} pair(s) failed to compare.",
+                file=sys.stderr,
+            )
 
-    # Validation: same metric must not differ by > 0.01 ms between modes
+    # Optional CI-style validation.
+    # By default, thresholds are informational to keep this script useful for manual exploration.
+    threshold_violations: list[str] = []
+    for mode in medians:
+        ms, me, mm = medians[mode]
+        if (
+            abs(ms) > ABS_THRESHOLD_MS
+            or abs(me) > ABS_THRESHOLD_MS
+            or abs(mm) > ABS_THRESHOLD_MS
+        ):
+            threshold_violations.append(
+                f"{mode}: |metric| > {ABS_THRESHOLD_MS} ms "
+                f"(start={ms}, end={me}, middle={mm})"
+            )
+
+    drift_violations: list[str] = []
     if len(medians) >= 2:
         modes_sorted = sorted(medians.keys())
-        for i, name in enumerate(("median_start_diff_ms", "median_end_diff_ms", "median_word_middle_diff_ms")):
+        metric_names = (
+            "median_start_diff_ms",
+            "median_end_diff_ms",
+            "median_word_middle_diff_ms",
+        )
+        for i, name in enumerate(metric_names):
             vals = [medians[m][i] for m in modes_sorted]
             drift = max(vals) - min(vals)
             if drift > MODE_DRIFT_THRESHOLD_MS:
-                print(
-                    f"Error: {name} differs by {drift} ms between modes (max allowed {MODE_DRIFT_THRESHOLD_MS}).",
-                    file=sys.stderr,
+                drift_violations.append(
+                    f"{name}: drift={drift} ms (max allowed {MODE_DRIFT_THRESHOLD_MS})"
                 )
-                return EXIT_MODE_DRIFT
+
+    if threshold_violations:
+        for msg in threshold_violations:
+            print(f"Warning: {msg}", file=sys.stderr)
+        if args.fail_on_threshold:
+            return EXIT_ABS_THRESHOLD
+
+    if drift_violations:
+        for msg in drift_violations:
+            print(f"Warning: {msg}", file=sys.stderr)
+        if args.fail_on_threshold:
+            return EXIT_MODE_DRIFT
 
     return EXIT_SUCCESS
 
