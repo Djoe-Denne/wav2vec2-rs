@@ -1435,9 +1435,23 @@
       "concepts/french-phoneme-ctc-grouping.md"
     ]
   },
+  "projects": {
+    "wav2vec2-rs": {
+      "source_cwd": "C:\\Users\\djden\\source\\repos\\wav2vec2-rs",
+      "last_synced": "2026-04-26T18:01:00+02:00",
+      "pages_in_vault": [
+        "projects/wav2vec2-rs.md",
+        "projects/wav2vec2-rs/roadmap.md",
+        "projects/wav2vec2-rs/concepts/model-runtimes.md",
+        "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md",
+        "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+        "projects/wav2vec2-rs/references/fp16-onnx-cuda-incident.md"
+      ]
+    }
+  },
   "stats": {
     "total_sources_ingested": 84,
-    "total_pages": 12,
-    "updated_at": "2026-04-26T16:10:03+02:00"
+    "total_pages": 14,
+    "updated_at": "2026-04-26T18:01:00+02:00"
   }
 }

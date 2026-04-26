@@ -269,7 +269,8 @@ struct ScalingSample {
 }
 
 fn main() {
-    if run().is_err() {
+    if let Err(err) = run() {
+        eprintln!("{err}");
         std::process::exit(1);
     }
 }

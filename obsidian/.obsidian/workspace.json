@@ -177,5 +177,8 @@
     }
   },
   "active": "b9d386aa7ca5b840",
-  "lastOpenFiles": []
+  "lastOpenFiles": [
+    "projects/wav2vec2-rs/references/fp16-onnx-cuda-incident.md",
+    "projects/wav2vec2-rs/roadmap.md"
+  ]
 }

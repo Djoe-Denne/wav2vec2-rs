@@ -4,7 +4,7 @@ title: Wiki Index
 
 # Wiki Index
 
-*This index is automatically maintained. Last updated: 2026-04-26T16:10:03+02:00*
+*This index is automatically maintained. Last updated: 2026-04-26T18:18:00+02:00*
 
 ## Concepts
 
@@ -25,6 +25,7 @@ title: Wiki Index
 ## References
 
 - [[Cursor Conversation Import]]
+- [[wav2vec2-rs FP16 ONNX CUDA Incident]]
 
 ## Synthesis
 
@@ -33,3 +34,4 @@ title: Wiki Index
 ## Projects
 
 - [[wav2vec2-rs]]
+- [[wav2vec2-rs Roadmap]]

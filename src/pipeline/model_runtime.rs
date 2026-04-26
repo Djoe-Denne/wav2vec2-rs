@@ -44,6 +44,7 @@ fn build_onnx_runtime_backend(
 struct CandleRuntimeBackend {
     model: Wav2Vec2ForCTC,
     device: Device,
+    dtype: DType,
 }
 
 impl CandleRuntimeBackend {
@@ -55,10 +56,11 @@ impl CandleRuntimeBackend {
             "cuda" => Device::new_cuda(0).map_err(|e| AlignmentError::runtime("CUDA init", e))?,
             _ => Device::Cpu,
         };
+        let dtype = candle_dtype(model_cfg)?;
 
         let model_data = std::fs::read(&config.model_path)
             .map_err(|e| AlignmentError::io("read safetensors", e))?;
-        let vb = VarBuilder::from_buffered_safetensors(model_data, DType::F32, &device)
+        let vb = VarBuilder::from_buffered_safetensors(model_data, dtype, &device)
             .map_err(|e| AlignmentError::runtime("load safetensors", e))?;
         let model = Wav2Vec2ForCTC::load(model_cfg, vb)
             .map_err(|e| AlignmentError::runtime("build model", e))?;
@@ -68,19 +70,59 @@ impl CandleRuntimeBackend {
             layers = model_cfg.num_hidden_layers,
             vocab = model_cfg.vocab_size,
             ?device,
+            ?dtype,
             "wav2vec2 Candle runtime loaded"
         );
 
-        Ok(Self { model, device })
+        Ok(Self {
+            model,
+            device,
+            dtype,
+        })
     }
 
     fn build_audio_tensor(&self, normalized_audio: &[f32]) -> Result<Tensor, AlignmentError> {
-        Tensor::from_vec(
+        let tensor = Tensor::from_vec(
             normalized_audio.to_vec(),
             (1, normalized_audio.len()),
             &self.device,
         )
-        .map_err(|e| AlignmentError::runtime("tensor creation", e))
+        .map_err(|e| AlignmentError::runtime("tensor creation", e))?;
+        tensor
+            .to_dtype(self.dtype)
+            .map_err(|e| AlignmentError::runtime("tensor dtype conversion", e))
+    }
+
+    fn log_probs_to_host_output(
+        &self,
+        log_probs_t: Tensor,
+    ) -> Result<RuntimeInferenceOutput, AlignmentError> {
+        let (num_frames_t, vocab_size) = log_probs_t
+            .dims2()
+            .map_err(|e| AlignmentError::runtime("log_probs dims2", e))?;
+        let dtype = format!("{:?}", log_probs_t.dtype()).to_ascii_lowercase();
+        let log_probs = log_probs_t
+            .to_dtype(DType::F32)
+            .and_then(|t| t.to_vec2())
+            .map_err(|e| AlignmentError::runtime("to_vec2", e))?;
+
+        Ok(RuntimeInferenceOutput {
+            log_probs,
+            num_frames_t,
+            vocab_size,
+            dtype,
+        })
+    }
+}
+
+fn candle_dtype(model_cfg: &Wav2Vec2ModelConfig) -> Result<DType, AlignmentError> {
+    match model_cfg.dtype.as_deref().map(str::to_ascii_lowercase) {
+        Some(dtype) if dtype == "float16" || dtype == "f16" => Ok(DType::F16),
+        Some(dtype) if dtype == "float32" || dtype == "f32" => Ok(DType::F32),
+        Some(dtype) => Err(AlignmentError::invalid_input(format!(
+            "unsupported Candle model dtype '{dtype}', expected float32 or float16"
+        ))),
+        None => Ok(DType::F32),
     }
 }
 
@@ -95,20 +137,9 @@ impl RuntimeBackend for CandleRuntimeBackend {
         let log_probs_t = candle_nn::ops::log_softmax(&logits, D::Minus1)
             .and_then(|t| t.squeeze(0))
             .map_err(|e| AlignmentError::runtime("log_softmax", e))?;
-        let (num_frames_t, vocab_size) = log_probs_t
-            .dims2()
-            .map_err(|e| AlignmentError::runtime("log_probs dims2", e))?;
-        let dtype = format!("{:?}", log_probs_t.dtype()).to_ascii_lowercase();
-        let log_probs = log_probs_t
-            .to_vec2()
-            .map_err(|e| AlignmentError::runtime("to_vec2", e))?;
-
-        Ok(ForwardOutput::Host(RuntimeInferenceOutput {
-            log_probs,
-            num_frames_t,
-            vocab_size,
-            dtype,
-        }))
+        Ok(ForwardOutput::Host(
+            self.log_probs_to_host_output(log_probs_t)?,
+        ))
     }
 
     fn infer_profiled(
@@ -131,23 +162,12 @@ impl RuntimeBackend for CandleRuntimeBackend {
         let log_probs_t = candle_nn::ops::log_softmax(&logits, D::Minus1)
             .and_then(|t| t.squeeze(0))
             .map_err(|e| AlignmentError::runtime("log_softmax", e))?;
-        let (num_frames_t, vocab_size) = log_probs_t
-            .dims2()
-            .map_err(|e| AlignmentError::runtime("log_probs dims2", e))?;
-        let dtype = format!("{:?}", log_probs_t.dtype()).to_ascii_lowercase();
-        let log_probs = log_probs_t
-            .to_vec2()
-            .map_err(|e| AlignmentError::runtime("to_vec2", e))?;
+        let runtime_output = self.log_probs_to_host_output(log_probs_t)?;
         self.synchronize("cuda synchronize after post timing")?;
         let post_ms = duration_to_ms(post_started.elapsed());
 
         Ok(ProfiledForwardOutput {
-            forward_output: ForwardOutput::Host(RuntimeInferenceOutput {
-                log_probs,
-                num_frames_t,
-                vocab_size,
-                dtype,
-            }),
+            forward_output: ForwardOutput::Host(runtime_output),
             forward_ms,
             post_ms,
         })

@@ -39,20 +39,35 @@ This project was heavily inspired by [wav2vec2aligner](https://github.com/EveryV
 
 ### Feature flags
 
-| Feature                  | Description                                                        |
-|--------------------------|--------------------------------------------------------------------|
-| `wgpu-dp`                 | wgpu Viterbi backend (Vulkan, DX12, Metal)                        |
-| `cuda-dp`                | CUDA Viterbi backend via cudarc + NVRTC (requires CUDA toolkit)   |
-| `onnx`                   | ONNX Runtime model backend (CPU or CUDA execution provider)       |
-| `alignment-profiling`    | Per-stage timing and memory profiling (benchmark mode)             |
+| Feature | Description |
+|---------|-------------|
+| `candle-cpu` | Explicit Candle CPU selector. Candle CPU is the baseline because Candle is a required dependency. |
+| `candle-cuda` / `candle-gpu` | Candle model inference on CUDA, if the local Candle/CUDA toolchain builds successfully. |
+| `onnx` / `onnx-cpu` | ONNX Runtime model backend on CPU. |
+| `onnx-cuda` | ONNX Runtime model backend with CUDA execution provider support. |
+| `onnx-cuda-dp` / `onnx-gpu` | ONNX CUDA model inference plus CUDA Viterbi zero-copy path. |
+| `wgpu-dp` | wgpu Viterbi backend (Vulkan, DX12, Metal). |
+| `cuda-dp` | CUDA Viterbi backend via cudarc + NVRTC (requires CUDA toolkit). |
+| `gpu-dp` | Enables both wgpu and CUDA Viterbi backends. |
+| `full-gpu` | Convenience bundle for Candle CUDA, ONNX GPU, and GPU DP backends. |
+| `alignment-profiling` | Per-stage timing and memory profiling (benchmark mode). |
 
-CI runs only CPU backends (default + `onnx`); GPU features (`wgpu-dp`, `cuda-dp`) are not tested in CI. For GPU benchmarks in CI, use the manual workflows **Prepare benchmark assets** and **GPU manual (benchmark)**; see [BENCHMARKS.md](BENCHMARKS.md#benchmark-assets-in-ci-github-actions).
+CI runs only CPU backends (default + `onnx`); GPU features (`wgpu-dp`, `cuda-dp`, `candle-cuda`, `onnx-cuda-dp`) are not tested in CI. For GPU benchmarks in CI, use the manual workflows **Prepare benchmark assets** and **GPU manual (benchmark)**; see [BENCHMARKS.md](BENCHMARKS.md#benchmark-assets-in-ci-github-actions).
 
 ### Basic (CPU only, Candle runtime)
 
 ```bash
 cargo build --release
 ```
+
+Candle CPU is the default validated path for safetensors models. Candle CUDA is available through `candle-cuda`; with Candle `0.10.2` on the tested Windows CUDA 13.2 toolchain, the build requires MSVC's conforming preprocessor flag:
+
+```powershell
+$env:CL="/Zc:preprocessor"
+cargo build --release --features "report-cli,alignment-profiling,candle-cuda"
+```
+
+A one-case LibriSpeech `test-clean` smoke test completed with `--runtime candle --device cuda`, reporting `device = "cuda"` and `dtype = "f32"`. This validates that Candle CUDA can launch locally, but it is not the same zero-copy path as ONNX CUDA DP: the current Candle runtime still converts log-probs back to host `Vec<Vec<f32>>` before Viterbi.
 
 ### With GPU Viterbi (wgpu)
 
@@ -63,7 +78,7 @@ cargo build --release --features wgpu-dp
 ### Full CUDA pipeline (ONNX + CUDA Viterbi zero-copy)
 
 ```bash
-cargo build --release --features "onnx,cuda-dp"
+cargo build --release --features onnx-cuda-dp
 ```
 
 This gives the fastest path: ORT produces logits on GPU → on-device log-softmax kernel → on-device Viterbi → only the state path array is transferred to host.
@@ -71,7 +86,7 @@ This gives the fastest path: ORT produces logits on GPU → on-device log-softma
 ### With profiling
 
 ```bash
-cargo build --release --features "onnx,cuda-dp,alignment-profiling"
+cargo build --release --features "onnx-cuda-dp,alignment-profiling"
 ```
 
 ---

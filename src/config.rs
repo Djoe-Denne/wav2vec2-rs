@@ -44,6 +44,8 @@ pub(crate) struct Wav2Vec2ModelConfig {
     pub layer_norm_eps: f64,
     pub pad_token_id: usize,
     pub vocab_size: usize,
+    #[serde(default)]
+    pub dtype: Option<String>,
     #[serde(default = "default_feat_norm")]
     pub feat_extract_norm: String,
     #[serde(default = "default_conv_bias")]
