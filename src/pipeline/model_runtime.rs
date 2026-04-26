@@ -19,21 +19,23 @@ pub(crate) fn build_runtime_backend(
 ) -> Result<Box<dyn RuntimeBackend>, AlignmentError> {
     match runtime_kind {
         RuntimeKind::Candle => Ok(Box::new(CandleRuntimeBackend::load(config, model_cfg)?)),
-        RuntimeKind::Onnx => build_onnx_runtime_backend(config),
+        RuntimeKind::Onnx => build_onnx_runtime_backend(config, model_cfg),
     }
 }
 
 fn build_onnx_runtime_backend(
     config: &Wav2Vec2Config,
+    model_cfg: &Wav2Vec2ModelConfig,
 ) -> Result<Box<dyn RuntimeBackend>, AlignmentError> {
     #[cfg(feature = "onnx")]
     {
-        Ok(Box::new(OnnxRuntimeBackend::load(config)?))
+        Ok(Box::new(OnnxRuntimeBackend::load(config, model_cfg)?))
     }
 
     #[cfg(not(feature = "onnx"))]
     {
         let _ = config;
+        let _ = model_cfg;
         Err(AlignmentError::runtime(
             "build runtime backend",
             "ONNX runtime support is disabled; enable the `onnx` cargo feature",
@@ -197,12 +199,17 @@ impl RuntimeBackend for CandleRuntimeBackend {
 struct OnnxRuntimeBackend {
     session: std::sync::Mutex<ort::session::Session>,
     device_label: String,
+    configured_precision: Option<OnnxTensorPrecision>,
 }
 
 #[cfg(feature = "onnx")]
 impl OnnxRuntimeBackend {
-    fn load(config: &Wav2Vec2Config) -> Result<Self, AlignmentError> {
+    fn load(
+        config: &Wav2Vec2Config,
+        model_cfg: &Wav2Vec2ModelConfig,
+    ) -> Result<Self, AlignmentError> {
         let execution_providers = onnx_execution_providers(config.device.as_str())?;
+        let configured_precision = OnnxTensorPrecision::from_config(model_cfg.dtype.as_deref())?;
         let session = ort::session::Session::builder()
             .map_err(|e| AlignmentError::runtime("onnx session builder", e))?
             .with_execution_providers(execution_providers)
@@ -215,6 +222,7 @@ impl OnnxRuntimeBackend {
             outputs = session.outputs().len(),
             model_path = %config.model_path,
             device = %config.device,
+            configured_precision = configured_precision.map(|p| p.label()).unwrap_or("unspecified"),
             "wav2vec2 ONNX runtime loaded"
         );
 
@@ -222,6 +230,7 @@ impl OnnxRuntimeBackend {
         Ok(Self {
             session: std::sync::Mutex::new(session),
             device_label: device_label.to_string(),
+            configured_precision,
         })
     }
 
@@ -246,13 +255,7 @@ impl OnnxRuntimeBackend {
             ));
         }
         let output = &outputs[0];
-        let (shape, logits) = output
-            .try_extract_tensor::<f32>()
-            .map_err(|e| AlignmentError::runtime("onnx extract logits", e))?;
-        Ok(OnnxRawLogits {
-            dims: shape.iter().copied().collect(),
-            logits: logits.to_vec(),
-        })
+        extract_onnx_raw_logits(output)
     }
 
     fn run_forward(&self, normalized_audio: &[f32]) -> Result<ForwardOutput, AlignmentError> {
@@ -267,7 +270,7 @@ impl OnnxRuntimeBackend {
             .map_err(|_| AlignmentError::runtime("onnx session lock", "session mutex poisoned"))?;
         let outputs = session
             .run(ort::inputs![input])
-            .map_err(|e| AlignmentError::runtime("onnx forward pass", e))?;
+            .map_err(|e| self.map_forward_error(e))?;
         if outputs.len() == 0 {
             return Err(AlignmentError::runtime(
                 "onnx forward pass",
@@ -283,17 +286,27 @@ impl OnnxRuntimeBackend {
             }
         }
 
-        let raw = {
-            let (shape, logits) = output
-                .try_extract_tensor::<f32>()
-                .map_err(|e| AlignmentError::runtime("onnx extract logits", e))?;
-            OnnxRawLogits {
-                dims: shape.iter().copied().collect(),
-                logits: logits.to_vec(),
-            }
-        };
+        let raw = extract_onnx_raw_logits(output)?;
         let runtime_output = onnx_raw_logits_to_log_probs(raw)?;
         Ok(ForwardOutput::Host(runtime_output))
+    }
+
+    fn map_forward_error(&self, err: impl std::fmt::Display) -> AlignmentError {
+        let message = err.to_string();
+        if self.device_label == "cuda" && is_known_low_precision_cuda_conv_failure(&message) {
+            let precision = self
+                .configured_precision
+                .map(|p| p.label())
+                .unwrap_or("low precision");
+            return AlignmentError::runtime(
+                "onnx forward pass",
+                format!(
+                    "{message}. ONNX Runtime CUDA failed while executing a {precision} wav2vec2 positional convolution; export a CUDA-safe mixed-precision ONNX artifact or use fp32 for CUDA inference."
+                ),
+            );
+        }
+
+        AlignmentError::runtime("onnx forward pass", message)
     }
 }
 
@@ -329,6 +342,148 @@ impl RuntimeBackend for OnnxRuntimeBackend {
 struct OnnxRawLogits {
     dims: Vec<i64>,
     logits: Vec<f32>,
+    dtype: String,
+}
+
+#[cfg(feature = "onnx")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OnnxTensorPrecision {
+    F16,
+    BF16,
+    F32,
+    F64,
+}
+
+#[cfg(feature = "onnx")]
+impl OnnxTensorPrecision {
+    fn from_config(dtype: Option<&str>) -> Result<Option<Self>, AlignmentError> {
+        let Some(dtype) = dtype else {
+            return Ok(None);
+        };
+        let normalized = normalize_precision_label(dtype);
+        let precision = match normalized.as_str() {
+            "float16" | "f16" | "fp16" => Self::F16,
+            "bfloat16" | "bf16" => Self::BF16,
+            "float32" | "f32" | "fp32" => Self::F32,
+            "float64" | "f64" | "fp64" => Self::F64,
+            _ => {
+                return Err(AlignmentError::invalid_input(format!(
+                    "unsupported ONNX model dtype '{dtype}', expected f32, f16, bf16, or f64"
+                )))
+            }
+        };
+        Ok(Some(precision))
+    }
+
+    fn from_tensor_element_type(
+        ty: ort::tensor::TensorElementType,
+    ) -> Result<Self, AlignmentError> {
+        match ty {
+            ort::tensor::TensorElementType::Float16 => Ok(Self::F16),
+            ort::tensor::TensorElementType::Bfloat16 => Ok(Self::BF16),
+            ort::tensor::TensorElementType::Float32 => Ok(Self::F32),
+            ort::tensor::TensorElementType::Float64 => Ok(Self::F64),
+            _ => Err(AlignmentError::invalid_input(format!(
+                "unsupported ONNX logits dtype '{ty}', expected f32, f16, bf16, or f64"
+            ))),
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::F16 => "f16",
+            Self::BF16 => "bf16",
+            Self::F32 => "f32",
+            Self::F64 => "f64",
+        }
+    }
+}
+
+#[cfg(feature = "onnx")]
+fn normalize_precision_label(dtype: &str) -> String {
+    dtype.trim().to_ascii_lowercase().replace(['-', '_'], "")
+}
+
+#[cfg(feature = "onnx")]
+fn extract_onnx_raw_logits(output: &ort::value::DynValue) -> Result<OnnxRawLogits, AlignmentError> {
+    use ort::value::DynTensorValueType;
+
+    let tensor_ref = output.downcast_ref::<DynTensorValueType>().map_err(|e| {
+        AlignmentError::runtime(
+            "onnx extract logits",
+            format!("model output is not a tensor: {e}"),
+        )
+    })?;
+    let precision = OnnxTensorPrecision::from_tensor_element_type(*tensor_ref.data_type())?;
+    if !tensor_ref.memory_info().is_cpu_accessible() {
+        return Err(AlignmentError::runtime(
+            "onnx extract logits",
+            format!(
+                "ONNX logits are {} on {:?}; host fallback requires CPU-accessible output. The CUDA zero-copy path currently accepts f32 output only; export logits as f32 or use a CUDA-safe mixed-precision artifact.",
+                precision.label(),
+                tensor_ref.memory_info().allocation_device()
+            ),
+        ));
+    }
+
+    let dtype = precision.label().to_string();
+    match precision {
+        OnnxTensorPrecision::F16 => {
+            let (shape, logits) = output
+                .try_extract_tensor::<half::f16>()
+                .map_err(|e| AlignmentError::runtime("onnx extract f16 logits", e))?;
+            Ok(OnnxRawLogits {
+                dims: shape.iter().copied().collect(),
+                logits: f16_logits_to_f32(logits),
+                dtype,
+            })
+        }
+        OnnxTensorPrecision::BF16 => {
+            let (shape, logits) = output
+                .try_extract_tensor::<half::bf16>()
+                .map_err(|e| AlignmentError::runtime("onnx extract bf16 logits", e))?;
+            Ok(OnnxRawLogits {
+                dims: shape.iter().copied().collect(),
+                logits: bf16_logits_to_f32(logits),
+                dtype,
+            })
+        }
+        OnnxTensorPrecision::F32 => {
+            let (shape, logits) = output
+                .try_extract_tensor::<f32>()
+                .map_err(|e| AlignmentError::runtime("onnx extract f32 logits", e))?;
+            Ok(OnnxRawLogits {
+                dims: shape.iter().copied().collect(),
+                logits: logits.to_vec(),
+                dtype,
+            })
+        }
+        OnnxTensorPrecision::F64 => {
+            let (shape, logits) = output
+                .try_extract_tensor::<f64>()
+                .map_err(|e| AlignmentError::runtime("onnx extract f64 logits", e))?;
+            Ok(OnnxRawLogits {
+                dims: shape.iter().copied().collect(),
+                logits: f64_logits_to_f32(logits),
+                dtype,
+            })
+        }
+    }
+}
+
+#[cfg(feature = "onnx")]
+fn f16_logits_to_f32(logits: &[half::f16]) -> Vec<f32> {
+    logits.iter().map(|v| v.to_f32()).collect()
+}
+
+#[cfg(feature = "onnx")]
+fn bf16_logits_to_f32(logits: &[half::bf16]) -> Vec<f32> {
+    logits.iter().map(|v| v.to_f32()).collect()
+}
+
+#[cfg(feature = "onnx")]
+fn f64_logits_to_f32(logits: &[f64]) -> Vec<f32> {
+    logits.iter().map(|v| *v as f32).collect()
 }
 
 #[cfg(feature = "onnx")]
@@ -364,6 +519,9 @@ fn try_cuda_forward_output(
     if mem_info.allocation_device() != AllocationDevice::CUDA {
         return None;
     }
+    if *tensor_ref.data_type() != ort::tensor::TensorElementType::Float32 {
+        return None;
+    }
 
     let shape = tensor_ref.shape();
     let dims: &[i64] = shape.as_ref();
@@ -396,6 +554,16 @@ fn parse_onnx_device(device: &str) -> Result<&'static str, AlignmentError> {
 }
 
 #[cfg(feature = "onnx")]
+fn is_known_low_precision_cuda_conv_failure(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    let mentions_pos_conv = lower.contains("pos_conv_embed") || lower.contains("convfwd");
+    let mentions_engine_failure = lower.contains("cudnn_fe")
+        || lower.contains("heuristic_query_failed")
+        || lower.contains("no valid engine");
+    mentions_pos_conv && mentions_engine_failure
+}
+
+#[cfg(feature = "onnx")]
 fn onnx_raw_logits_to_log_probs(
     raw: OnnxRawLogits,
 ) -> Result<RuntimeInferenceOutput, AlignmentError> {
@@ -410,7 +578,7 @@ fn onnx_raw_logits_to_log_probs(
         log_probs,
         num_frames_t,
         vocab_size,
-        dtype: "f32".to_string(),
+        dtype: raw.dtype,
     })
 }
 
@@ -512,5 +680,67 @@ mod onnx_tests {
         let err = parse_onnx_output_shape(&[7, 32], 7 * 32 - 1)
             .expect_err("shape/data mismatch must be rejected");
         assert!(err.to_string().contains("shape/data mismatch"));
+    }
+
+    #[test]
+    fn precision_config_accepts_supported_aliases() {
+        assert_eq!(
+            OnnxTensorPrecision::from_config(Some("float16")).unwrap(),
+            Some(OnnxTensorPrecision::F16)
+        );
+        assert_eq!(
+            OnnxTensorPrecision::from_config(Some("bf16")).unwrap(),
+            Some(OnnxTensorPrecision::BF16)
+        );
+        assert_eq!(
+            OnnxTensorPrecision::from_config(Some("fp32")).unwrap(),
+            Some(OnnxTensorPrecision::F32)
+        );
+        assert_eq!(
+            OnnxTensorPrecision::from_config(Some("float64")).unwrap(),
+            Some(OnnxTensorPrecision::F64)
+        );
+        assert_eq!(OnnxTensorPrecision::from_config(None).unwrap(), None);
+    }
+
+    #[test]
+    fn precision_config_rejects_unknown_dtype() {
+        let err = OnnxTensorPrecision::from_config(Some("int8"))
+            .expect_err("unsupported ONNX precision should fail");
+        assert!(err.to_string().contains("unsupported ONNX model dtype"));
+    }
+
+    #[test]
+    fn lower_precision_logits_convert_to_f32() {
+        let f16 = [half::f16::from_f32(1.5), half::f16::from_f32(-2.0)];
+        assert_eq!(f16_logits_to_f32(&f16), vec![1.5, -2.0]);
+
+        let bf16 = [half::bf16::from_f32(3.0), half::bf16::from_f32(-4.0)];
+        assert_eq!(bf16_logits_to_f32(&bf16), vec![3.0, -4.0]);
+
+        assert_eq!(f64_logits_to_f32(&[5.0, -6.0]), vec![5.0, -6.0]);
+    }
+
+    #[test]
+    fn raw_logits_to_log_probs_preserves_original_dtype_label() {
+        let raw = OnnxRawLogits {
+            dims: vec![1, 2, 2],
+            logits: vec![1.0, 2.0, 3.0, 4.0],
+            dtype: "f16".to_string(),
+        };
+        let out = onnx_raw_logits_to_log_probs(raw).expect("log-softmax should succeed");
+        assert_eq!(out.dtype, "f16");
+        assert_eq!(out.num_frames_t, 2);
+        assert_eq!(out.vocab_size, 2);
+    }
+
+    #[test]
+    fn known_cuda_conv_failure_is_detected() {
+        let message =
+            "CUDNN_FE failure 8: HEURISTIC_QUERY_FAILED No valid engine configs for ConvFwd_ /wav2vec2/encoder/pos_conv_embed/conv/Conv";
+        assert!(is_known_low_precision_cuda_conv_failure(message));
+        assert!(!is_known_low_precision_cuda_conv_failure(
+            "unrelated CUDA error"
+        ));
     }
 }

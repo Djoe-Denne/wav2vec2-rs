@@ -19,6 +19,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -59,6 +60,15 @@ def parse_args() -> argparse.Namespace:
         choices=("auto", "cpu", "cuda"),
         default="cpu",
         help="Export device (default: cpu).",
+    )
+    parser.add_argument(
+        "--precision",
+        choices=("fp32", "fp16", "bf16", "cuda-safe-fp16"),
+        default="fp32",
+        help=(
+            "Model compute precision for the exported ONNX graph. "
+            "The ONNX input/output stay f32; cuda-safe-fp16 keeps wav2vec2 positional conv in f32."
+        ),
     )
     parser.add_argument(
         "--dummy-seconds",
@@ -221,25 +231,167 @@ def choose_device(requested: str):
 class _CtcForwardWrapper:  # pylint: disable=too-few-public-methods
     """nn.Module wrapper returning only logits for ONNX export."""
 
-    def __init__(self, model):
+    def __init__(self, model, input_dtype=None):
         import torch.nn as nn
 
         if not isinstance(model, nn.Module):
             raise TypeError(f"Expected torch.nn.Module, got {type(model)!r}")
         self._impl = model
+        self._input_dtype = input_dtype
 
     def as_module(self):
+        import torch
         import torch.nn as nn
 
         class _Wrapper(nn.Module):
-            def __init__(self, impl):
+            def __init__(self, impl, input_dtype):
                 super().__init__()
                 self.impl = impl
+                self.input_dtype = input_dtype
 
             def forward(self, input_values):
-                return self.impl(input_values=input_values).logits
+                if self.input_dtype is not None:
+                    input_values = input_values.to(dtype=self.input_dtype)
+                logits = self.impl(input_values=input_values).logits
+                return logits.to(dtype=torch.float32)
 
-        return _Wrapper(self._impl)
+        return _Wrapper(self._impl, self._input_dtype)
+
+
+def _fp32_island_module(module):
+    """Run a submodule in fp32 inside an otherwise lower-precision export graph."""
+
+    import torch
+    import torch.nn as nn
+
+    class _Wrapper(nn.Module):
+        def __init__(self, wrapped):
+            super().__init__()
+            self.wrapped = wrapped.float()
+
+        def forward(self, *args, **kwargs):
+            original_dtype = _first_floating_dtype(args, kwargs)
+            cast_args = _cast_floating_tensors(args, torch.float32)
+            cast_kwargs = _cast_floating_tensors(kwargs, torch.float32)
+            output = self.wrapped(*cast_args, **cast_kwargs)
+            if original_dtype is None:
+                return output
+            return _cast_floating_tensors(output, original_dtype)
+
+    return _Wrapper(module)
+
+
+def _first_floating_dtype(args, kwargs):
+    import torch
+
+    def visit(value):
+        if isinstance(value, torch.Tensor) and value.is_floating_point():
+            return value.dtype
+        if isinstance(value, (tuple, list)):
+            for item in value:
+                dtype = visit(item)
+                if dtype is not None:
+                    return dtype
+        if isinstance(value, dict):
+            for item in value.values():
+                dtype = visit(item)
+                if dtype is not None:
+                    return dtype
+        return None
+
+    return visit((args, kwargs))
+
+
+def _cast_floating_tensors(value, dtype):
+    import torch
+
+    if isinstance(value, torch.Tensor) and value.is_floating_point():
+        return value.to(dtype=dtype)
+    if isinstance(value, tuple):
+        return tuple(_cast_floating_tensors(item, dtype) for item in value)
+    if isinstance(value, list):
+        return [_cast_floating_tensors(item, dtype) for item in value]
+    if isinstance(value, dict):
+        return {key: _cast_floating_tensors(item, dtype) for key, item in value.items()}
+    return value
+
+
+def _get_nested_module(root, module_path: str):
+    current = root
+    for part in module_path.split("."):
+        current = getattr(current, part)
+    return current
+
+
+def _set_nested_module(root, module_path: str, module) -> None:
+    parts = module_path.split(".")
+    parent = root
+    for part in parts[:-1]:
+        parent = getattr(parent, part)
+    setattr(parent, parts[-1], module)
+
+
+def _torch_dtype_for_precision(precision: str):
+    import torch
+
+    if precision == "fp32":
+        return None
+    if precision in {"fp16", "cuda-safe-fp16"}:
+        return torch.float16
+    if precision == "bf16":
+        return torch.bfloat16
+    raise ValueError(f"Unsupported precision: {precision}")
+
+
+def _config_dtype_for_precision(precision: str) -> str:
+    if precision == "bf16":
+        return "bfloat16"
+    if precision in {"fp16", "cuda-safe-fp16"}:
+        return "float16"
+    return "float32"
+
+
+def _apply_export_precision(model, precision: str):
+    target_dtype = _torch_dtype_for_precision(precision)
+    if target_dtype is None:
+        return None
+
+    model.to(dtype=target_dtype)
+    if precision == "cuda-safe-fp16":
+        _keep_positional_conv_fp32(model)
+    return target_dtype
+
+
+def _keep_positional_conv_fp32(model) -> None:
+    candidate_paths = (
+        "wav2vec2.encoder.pos_conv_embed.conv",
+        "hubert.encoder.pos_conv_embed.conv",
+    )
+    for module_path in candidate_paths:
+        try:
+            conv = _get_nested_module(model, module_path)
+        except AttributeError:
+            continue
+        _set_nested_module(model, module_path, _fp32_island_module(conv))
+        print(f"CUDA-safe fp16: keeping {module_path} in fp32.")
+        return
+    raise RuntimeError(
+        "cuda-safe-fp16 requested but wav2vec2 positional convolution was not found"
+    )
+
+
+def write_precision_metadata(output_dir: Path, precision: str) -> None:
+    config_path = output_dir / "config.json"
+    if not config_path.exists():
+        return
+    data = json.loads(config_path.read_text(encoding="utf-8"))
+    data["dtype"] = _config_dtype_for_precision(precision)
+    if precision == "cuda-safe-fp16":
+        data["wav2vec2_rs_precision_policy"] = "cuda-safe-fp16-pos-conv-fp32"
+    config_path.write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
 
 
 def export_onnx(args: argparse.Namespace) -> Path:
@@ -250,6 +402,7 @@ def export_onnx(args: argparse.Namespace) -> Path:
     device = choose_device(args.device)
     print(f"Model source: {source_kind} ({model_ref})")
     print(f"Export device: {device}")
+    print(f"Export precision: {args.precision}")
 
     load_kwargs: dict = {}
     if args.revision:
@@ -264,11 +417,12 @@ def export_onnx(args: argparse.Namespace) -> Path:
     model = AutoModelForCTC.from_pretrained(model_ref, **load_kwargs)
     model.eval()
     model.to(device)
+    model_input_dtype = _apply_export_precision(model, args.precision)
 
     # Dynamic time axis export: [batch, num_samples] -> [batch, num_frames, vocab]
     input_samples = max(1, int(args.sample_rate * args.dummy_seconds))
     dummy_input = torch.zeros((1, input_samples), dtype=torch.float32, device=device)
-    wrapper = _CtcForwardWrapper(model).as_module()
+    wrapper = _CtcForwardWrapper(model, input_dtype=model_input_dtype).as_module()
     wrapper.eval()
 
     output_path = args.output_path.resolve()
@@ -320,6 +474,7 @@ def export_onnx(args: argparse.Namespace) -> Path:
         output_dir=output_path.parent,
         load_kwargs=load_kwargs,
     )
+    write_precision_metadata(output_path.parent, args.precision)
     return output_path
 
 

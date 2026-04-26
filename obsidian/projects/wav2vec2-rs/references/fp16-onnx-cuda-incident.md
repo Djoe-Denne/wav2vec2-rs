@@ -53,7 +53,7 @@ The current practical runtime guidance is to use FP32 ONNX with CUDA for fast in
 
 ## Follow-Up
 
-Track mitigation work in [[wav2vec2-rs Roadmap]]. Candidate fixes include trying another ONNX Runtime/CUDA/cuDNN stack, exporting a mixed-precision ONNX model that keeps this convolution in FP32, or patching the graph to avoid the failing CUDA provider path. ^[inferred]
+Mitigation work is tracked in [[wav2vec2-rs Roadmap]]. The current exporter supports `--precision cuda-safe-fp16`, which lowers most ONNX model compute to FP16 while keeping the wav2vec2 positional convolution in FP32 and preserving FP32 graph input/output for the Rust runtime. Further work could still test other ONNX Runtime/CUDA/cuDNN stacks. ^[inferred]
 
 ## Related Notes
 

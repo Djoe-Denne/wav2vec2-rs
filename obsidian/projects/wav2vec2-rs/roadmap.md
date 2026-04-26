@@ -35,11 +35,11 @@ This page tracks follow-up work for [[wav2vec2-rs]] that should not be forgotten
   - A one-case LibriSpeech `test-clean` report completed with `--runtime candle --device cuda`, reporting `dtype = f32` and `device = cuda`.
   - Remaining work: run a larger benchmark and decide whether a Candle device-buffer path is worth implementing, because the current Candle runtime still returns host log-probs before Viterbi. ^[inferred]
 
-- [ ] Investigate FP16 ONNX CUDA support for wav2vec2 positional convolution.
+- [x] Add FP16 ONNX CUDA mitigation for wav2vec2 positional convolution.
   - Current finding: the tested FP16 ONNX model runs on CPU but fails on CUDA before logits are produced.
   - Incident cause: [[wav2vec2-rs FP16 ONNX CUDA Incident]] records the ONNX Runtime/cuDNN frontend engine-selection failure on the wav2vec2 positional convolution.
-  - Current practical path: use FP32 ONNX with CUDA for fast inference.
-  - Candidate approaches: test another ONNX Runtime/CUDA/cuDNN stack, export a mixed-precision ONNX model that keeps the problematic convolution in FP32, or patch the ONNX graph to avoid the failing CUDA provider path. ^[inferred]
+  - Implemented mitigation: the ONNX exporter supports `--precision cuda-safe-fp16`, which keeps Rust-facing input/output tensors in FP32, lowers most model compute to FP16, and keeps the positional convolution in FP32.
+  - Runtime behavior: ONNX output extraction accepts `f32`, `f16`, `bf16`, and `f64` CPU-accessible logits, converting them to host `f32` log-probs; CUDA zero-copy remains gated to `f32` logits. ^[inferred]
 
 ## Related Notes
 

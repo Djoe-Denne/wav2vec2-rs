@@ -83,6 +83,21 @@ cargo build --release --features onnx-cuda-dp
 
 This gives the fastest path: ORT produces logits on GPU → on-device log-softmax kernel → on-device Viterbi → only the state path array is transferred to host.
 
+ONNX inference is precision-aware at the runtime boundary. `f32` CUDA logits keep the zero-copy CUDA Viterbi path; `f16`, `bf16`, and `f64` logits are converted to `f32` host log-probs when ORT returns CPU-accessible output. If ORT keeps non-`f32` logits on CUDA, the runtime reports that zero-copy currently requires `f32` output.
+
+For lower-precision ONNX artifacts, keep the Rust runtime contract as `f32` audio input and `f32` logits output:
+
+```bash
+python scripts/export_ctc_model_to_onnx.py \
+    --model-source hf \
+    --model-id-or-path facebook/wav2vec2-base-960h \
+    --output-path models/onnx_wav2vec2_base_960h_fp16/model.onnx \
+    --precision cuda-safe-fp16 \
+    --validate
+```
+
+`--precision fp16` and `--precision bf16` lower the model compute dtype. `--precision cuda-safe-fp16` additionally keeps the wav2vec2 positional convolution in `fp32`, which avoids the known ONNX Runtime/cuDNN engine-selection failure seen with fully-FP16 CUDA exports.
+
 ### With profiling
 
 ```bash

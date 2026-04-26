@@ -25,13 +25,14 @@ claxon = { version = "0.4.3", optional = true }
 textgrid = { version = "0.1.0", optional = true }
 indicatif = { version = "0.17", optional = true }
 
-ort = { version = "=2.0.0-rc.11", default-features = false, features = ["std", "ndarray", "load-dynamic", "download-binaries", "copy-dylibs", "tls-native"], optional = true }
+ort = { version = "=2.0.0-rc.11", default-features = false, features = ["std", "ndarray", "half", "load-dynamic", "download-binaries", "copy-dylibs", "tls-native"], optional = true }
 wgpu = { version = "24", optional = true }
 pollster = { version = "0.4", optional = true }
 bytemuck = { version = "1", features = ["derive"], optional = true }
 cudarc = { version = "0.19.4", features = ["nvrtc", "cuda-version-from-build-system"], optional = true }
 libc = { version = "0.2", optional = true }
 windows-sys = { version = "0.52", optional = true, features = ["Win32_System_ProcessStatus", "Win32_Foundation", "Win32_System_Threading", "Win32_System_LibraryLoader"] }
+half = "2.7.1"
 
 [features]
 default = []

@@ -57,7 +57,9 @@ Model precision is a property of the model artifact, not a separate alignment-pi
 - FP32 ONNX on CUDA completed successfully, around an order of magnitude faster on the small subset.
 - FP16 ONNX on CUDA failed inside ONNX Runtime's CUDA provider before logits were produced.
 
-For current work, FP32 ONNX plus CUDA is the practical fast path. FP16 ONNX should be treated as CPU-runnable but not CUDA-ready in this environment until the provider/kernel limitation is resolved. See [[wav2vec2-rs Roadmap]].
+The Rust ONNX runtime now treats output precision explicitly. `f32` CUDA logits remain eligible for the zero-copy CUDA Viterbi path. `f16`, `bf16`, and `f64` logits are converted to host `f32` log-probs when ORT returns CPU-accessible output; non-`f32` CUDA-device logits produce a targeted error because the zero-copy CUDA log-softmax kernel currently reads `f32`.
+
+For CUDA lower-precision artifacts, `scripts/export_ctc_model_to_onnx.py --precision cuda-safe-fp16` keeps wav2vec2 input/output tensors as `f32`, lowers most model compute to FP16, and keeps the positional convolution in FP32 to avoid the known ORT/cuDNN engine-selection failure. See [[wav2vec2-rs Roadmap]].
 
 ## Runtime Boundary
 
