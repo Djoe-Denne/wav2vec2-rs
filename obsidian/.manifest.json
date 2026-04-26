@@ -1,0 +1,1443 @@
+{
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\6e65cdec-8448-40e6-a700-6c8e956caf86\\6e65cdec-8448-40e6-a700-6c8e956caf86.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 5010,
+    "modified_at": "2026-04-26T15:29:08+02:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Wiki setup"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\fa3040d8-10a7-4280-86a2-7ff57d1b0d9f\\fa3040d8-10a7-4280-86a2-7ff57d1b0d9f.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 40389,
+    "modified_at": "2026-03-11T20:39:08+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "French phoneme grouping"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\2b31f115-0da1-47b6-a377-30b7beb9fc4e\\2b31f115-0da1-47b6-a377-30b7beb9fc4e.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 30364,
+    "modified_at": "2026-03-11T20:15:09+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\3e9d9dbf-0353-4120-aebf-3fec492f72fb\\3e9d9dbf-0353-4120-aebf-3fec492f72fb.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 65823,
+    "modified_at": "2026-03-11T19:56:44+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "French phoneme grouping"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\442d3b91-9562-47d3-a61d-e3331ead7194\\442d3b91-9562-47d3-a61d-e3331ead7194.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 18649,
+    "modified_at": "2026-03-08T13:07:36+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Crate publication"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\5e56766c-5499-4969-a8a5-84ab42313341\\5e56766c-5499-4969-a8a5-84ab42313341.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 18103,
+    "modified_at": "2026-03-08T12:23:47+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\baa257a9-e908-476a-bc88-26f730c31fbd\\baa257a9-e908-476a-bc88-26f730c31fbd.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 107723,
+    "modified_at": "2026-03-08T11:41:26+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\a16f64a0-f5ff-4ebe-905a-225ae2dcf95b\\a16f64a0-f5ff-4ebe-905a-225ae2dcf95b.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 152631,
+    "modified_at": "2026-03-07T11:28:35+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\4ce51b7e-d612-4021-b9d6-272c7f0bc1e5\\4ce51b7e-d612-4021-b9d6-272c7f0bc1e5.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 81790,
+    "modified_at": "2026-03-02T22:43:50+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\653c4cb5-94b8-43c4-b7e1-31e3876869db\\653c4cb5-94b8-43c4-b7e1-31e3876869db.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 1407,
+    "modified_at": "2026-03-01T20:00:30+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\22d9fa91-7a93-4f25-9dd2-44a2dca78508\\22d9fa91-7a93-4f25-9dd2-44a2dca78508.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 7545,
+    "modified_at": "2026-03-01T19:35:12+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "SonarQube cleanup"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\95c4107a-687e-4d7a-87ff-88ba1423c8fe\\95c4107a-687e-4d7a-87ff-88ba1423c8fe.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 4808,
+    "modified_at": "2026-03-01T19:24:42+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\fadf121c-a6b3-4efe-9000-49aaed1e5365\\fadf121c-a6b3-4efe-9000-49aaed1e5365.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 39857,
+    "modified_at": "2026-03-01T19:15:02+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Tests and CI"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\69b98eae-4631-428a-831f-7a89ebcdf25c\\69b98eae-4631-428a-831f-7a89ebcdf25c.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 12724,
+    "modified_at": "2026-03-01T18:53:05+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "SonarQube cleanup"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\637c260e-dbfa-417e-8a77-22a54bdaedb2\\637c260e-dbfa-417e-8a77-22a54bdaedb2.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 14036,
+    "modified_at": "2026-03-01T17:56:05+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Tests and CI"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\bac6fd83-4162-42b0-b51c-459472f28ec9\\bac6fd83-4162-42b0-b51c-459472f28ec9.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 3268,
+    "modified_at": "2026-03-01T17:50:29+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\8306aded-fe14-4db5-a805-35baa11f0391\\8306aded-fe14-4db5-a805-35baa11f0391.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 19661,
+    "modified_at": "2026-03-01T17:41:12+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\ba2ca2c5-b122-4682-a45b-ca20e4d68969\\ba2ca2c5-b122-4682-a45b-ca20e4d68969.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 80589,
+    "modified_at": "2026-03-01T17:11:30+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\a8ce5b11-9a11-474f-950c-f3088b71890c\\a8ce5b11-9a11-474f-950c-f3088b71890c.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 46378,
+    "modified_at": "2026-03-01T15:18:34+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\cea47ac9-79fb-4386-8ea7-e94fbb4316b9\\cea47ac9-79fb-4386-8ea7-e94fbb4316b9.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 17868,
+    "modified_at": "2026-03-01T13:20:56+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\63e6b64d-920f-48f8-8700-d6f5df1ab242\\63e6b64d-920f-48f8-8700-d6f5df1ab242.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 25529,
+    "modified_at": "2026-03-01T10:58:48+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\11695a76-acde-42fb-ba56-43066524dd00\\11695a76-acde-42fb-ba56-43066524dd00.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 34337,
+    "modified_at": "2026-02-28T22:03:54+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\754dfa81-2300-420d-b521-f7511ac6310d\\754dfa81-2300-420d-b521-f7511ac6310d.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 29962,
+    "modified_at": "2026-02-28T19:45:17+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\d95f467f-a0e5-426e-9b0c-f903d2737fd9\\d95f467f-a0e5-426e-9b0c-f903d2737fd9.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 63278,
+    "modified_at": "2026-02-28T18:37:57+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\9d5cbea5-86b6-4edf-8819-af0be9e608ad\\9d5cbea5-86b6-4edf-8819-af0be9e608ad.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 69120,
+    "modified_at": "2026-02-28T18:16:10+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\cc5073c2-0fae-4f8d-92cd-d5df80d70383\\cc5073c2-0fae-4f8d-92cd-d5df80d70383.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 6660,
+    "modified_at": "2026-02-28T14:41:08+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\aececa92-8358-4017-8aaf-fb30dc86a0d1\\aececa92-8358-4017-8aaf-fb30dc86a0d1.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 84241,
+    "modified_at": "2026-02-28T14:28:22+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\87199eb2-d523-400b-b895-c5b1c07209d5\\87199eb2-d523-400b-b895-c5b1c07209d5.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 10292,
+    "modified_at": "2026-02-28T13:20:49+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\6342f885-f8b7-4e67-ba71-390d904f180a\\6342f885-f8b7-4e67-ba71-390d904f180a.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 43555,
+    "modified_at": "2026-02-28T12:14:35+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Crate publication"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\561158de-ae85-43bb-84a5-c5723df76a8c\\561158de-ae85-43bb-84a5-c5723df76a8c.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 37023,
+    "modified_at": "2026-02-26T22:47:22+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "ONNX export"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\90172e8d-94d9-4990-aab8-352018e9a783\\90172e8d-94d9-4990-aab8-352018e9a783.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 27876,
+    "modified_at": "2026-02-26T19:39:43+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\27f444b8-29fe-4d24-a97c-a493956d07df\\27f444b8-29fe-4d24-a97c-a493956d07df.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 4366,
+    "modified_at": "2026-02-26T19:10:41+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\d5e90375-1589-49ba-9e97-0b6b8af19a9d\\d5e90375-1589-49ba-9e97-0b6b8af19a9d.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 44422,
+    "modified_at": "2026-02-26T18:56:58+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\21583620-1842-4135-836c-fd05f05c3a74\\21583620-1842-4135-836c-fd05f05c3a74.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 24030,
+    "modified_at": "2026-02-26T18:19:50+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\a17a600c-c90a-4b34-982b-3687d8d928c0\\a17a600c-c90a-4b34-982b-3687d8d928c0.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 48883,
+    "modified_at": "2026-02-26T11:55:36+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\5082b2e9-fd57-4d02-adb2-4247a48dd288\\5082b2e9-fd57-4d02-adb2-4247a48dd288.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 45646,
+    "modified_at": "2026-02-26T00:05:30+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\e58570a3-42fe-43ab-a03f-cfc49e658953\\e58570a3-42fe-43ab-a03f-cfc49e658953.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 51942,
+    "modified_at": "2026-02-25T23:02:51+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Tests and CI"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\308fcf5b-a392-41c3-97f4-2b1afe51a0fe\\308fcf5b-a392-41c3-97f4-2b1afe51a0fe.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 55839,
+    "modified_at": "2026-02-25T21:30:59+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\6e31d82f-9134-4a19-a8c3-e8166a1c3fa0\\6e31d82f-9134-4a19-a8c3-e8166a1c3fa0.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 135154,
+    "modified_at": "2026-02-25T20:49:34+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\e36f2a39-db42-46b4-a432-b2e87ebfc12c\\e36f2a39-db42-46b4-a432-b2e87ebfc12c.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 469249,
+    "modified_at": "2026-02-25T17:32:13+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\7bae49ee-ab56-4b89-8bab-b317e840e9d7\\7bae49ee-ab56-4b89-8bab-b317e840e9d7.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 26387,
+    "modified_at": "2026-02-25T12:23:35+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\0de91625-abbc-426a-b330-3ab03f3e36da\\0de91625-abbc-426a-b330-3ab03f3e36da.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 20314,
+    "modified_at": "2026-02-25T00:06:17+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Tests and CI"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\c67a7e8e-d375-45ee-a8fe-5df8b880c3ab\\c67a7e8e-d375-45ee-a8fe-5df8b880c3ab.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 56585,
+    "modified_at": "2026-02-24T23:50:12+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\371b2a73-7a06-4a22-bc62-b9893c325624\\371b2a73-7a06-4a22-bc62-b9893c325624.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 108579,
+    "modified_at": "2026-02-24T21:29:45+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\4a7ac1b7-0ab9-46dc-ae09-1f62d845e903\\4a7ac1b7-0ab9-46dc-ae09-1f62d845e903.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 55902,
+    "modified_at": "2026-02-23T23:04:26+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\9c53a3f7-bf00-4d39-ae25-c16eea1fe3c6\\9c53a3f7-bf00-4d39-ae25-c16eea1fe3c6.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 2826,
+    "modified_at": "2026-02-23T22:32:25+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\58140b16-55d6-4a7a-bdc4-dbcc834e8059\\58140b16-55d6-4a7a-bdc4-dbcc834e8059.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 5632,
+    "modified_at": "2026-02-23T22:19:45+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\c4f84e22-cab8-4aa4-95a1-880d924fd626\\c4f84e22-cab8-4aa4-95a1-880d924fd626.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 990333,
+    "modified_at": "2026-02-23T22:19:27+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Benchmarking and datasets"
+  },
+  "C:\\Users\\djden\\.cursor\\projects\\c-Users-djden-source-repos-wav2vec2-rs\\agent-transcripts\\05c772d4-85c2-44ce-b3cf-f78ba945704d\\05c772d4-85c2-44ce-b3cf-f78ba945704d.jsonl": {
+    "ingested_at": "2026-04-26T15:33:33+02:00",
+    "size_bytes": 1109,
+    "modified_at": "2026-02-23T20:32:01+01:00",
+    "source_type": "cursor_conversation",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md",
+      "skills/exporting-wav2vec2-ctc-models-to-onnx.md",
+      "references/cursor-conversation-import.md"
+    ],
+    "pages_updated": [],
+    "theme": "Project maintenance"
+  },
+  "version": 1,
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\README.md": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 19182,
+    "modified_at": "2026-03-08T13:07:29+01:00",
+    "content_hash": "sha256:4e360e8c9ef5cbeccf3b050009129dd05ad361ca21a86beac8e5828f72bb0f1c",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\cuda\\viterbi_cuda.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 6963,
+    "modified_at": "2026-03-01T15:14:07+01:00",
+    "content_hash": "sha256:1e0f57ad5c715245cd7f456c5f48c1b81cbf1d73293ccbf87a5027e1db48218d",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\gpu\\mod.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 0,
+    "modified_at": "2026-02-27T22:50:58+01:00",
+    "content_hash": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\gpu\\viterbi_gpu.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 12059,
+    "modified_at": "2026-03-01T15:14:07+01:00",
+    "content_hash": "sha256:28b04f252ec44b366709f9308070c4040e662d972e131b102342f7cb843c066a",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\grouping\\blank_expansion.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 8352,
+    "modified_at": "2026-03-08T10:53:44+01:00",
+    "content_hash": "sha256:484ec5893cb99c8bcadc8f2c3e1d1d1af80d60b3dfc2741bb918f6f16b8e31cf",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\grouping\\candidate_selector.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 7571,
+    "modified_at": "2026-03-08T10:53:44+01:00",
+    "content_hash": "sha256:27d6f144053c38b18c0bf5df5d258c3097c8b40531ca50c88cb9dd4822cf0e35",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\grouping\\mod.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 7602,
+    "modified_at": "2026-04-26T16:05:25+02:00",
+    "content_hash": "sha256:7f82639b3bcd3e7c3b6669ab703ea3ff6c90e55f2c524513302dd28d30606253",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\grouping\\path_to_words.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 10740,
+    "modified_at": "2026-03-08T10:53:44+01:00",
+    "content_hash": "sha256:f9e48afdd457771a2cde8268e728b872f94c3a12f46a4e9140fd85046c844bd3",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\grouping\\tests.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 14016,
+    "modified_at": "2026-04-26T16:05:25+02:00",
+    "content_hash": "sha256:34dde2455aa85d7d230dabe3fa25d760558dc70c1ff78985a0afecd2635e1712",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\mod.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 73,
+    "modified_at": "2026-03-01T15:14:07+01:00",
+    "content_hash": "sha256:37f532d1ef9d49377a104ac05c5afe947c8eab973a764e3af5662449ab47cfec",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\report.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 50816,
+    "modified_at": "2026-03-08T10:53:44+01:00",
+    "content_hash": "sha256:51d833ea47ff08db90413ffa1d6f6583b6835ff5a5e76a3d518697162f1cdff9",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\tokenization.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 6485,
+    "modified_at": "2026-04-26T16:05:25+02:00",
+    "content_hash": "sha256:5e4b34d27b850962b94a116ac2a4be8fd81d2c5c5b3d85d7f681684d2b332d7f",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\alignment\\viterbi.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 8635,
+    "modified_at": "2026-03-08T10:53:44+01:00",
+    "content_hash": "sha256:666b7fb4aeefb3f85e4eed587801420f8145e48171b4229269d37f5a0db8f743",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\bin\\alignment_report\\json_report_formatter.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 879,
+    "modified_at": "2026-02-26T11:40:57+01:00",
+    "content_hash": "sha256:d2b36f8e566bf559a38e6db3b3ae51a3125ef0eda842067df5c143b599a6a3d9",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\bin\\alignment_report\\perf_report_formatter.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 7757,
+    "modified_at": "2026-03-01T09:45:15+01:00",
+    "content_hash": "sha256:019c28169bb597cf3b63c6271cf618a75c0618bf85d06ddcf3d6cd471acc6d1b",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\bin\\alignment_report\\text_grid_report_formatter.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 4291,
+    "modified_at": "2026-02-26T19:30:13+01:00",
+    "content_hash": "sha256:dc580b2daa352dfa67c15c8232bf2c3059710d8419115615f6352d109488c0f7",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\bin\\alignment_report.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 58062,
+    "modified_at": "2026-04-26T15:27:58+02:00",
+    "content_hash": "sha256:8b80668114003f1a46bd93f736de142dd6f95c779b5cf6119dbc86e194eb487f",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\config.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 5944,
+    "modified_at": "2026-04-26T16:05:25+02:00",
+    "content_hash": "sha256:2b71630c899afb0b88af055a60988cae059c92d87d943b4504247449ff4aa32a",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\error.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 2724,
+    "modified_at": "2026-04-26T16:05:25+02:00",
+    "content_hash": "sha256:35adda9938679696e2c414b8d5f71c64310b69a54211f847478f59c47c5ddbaf",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\lib.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 670,
+    "modified_at": "2026-03-11T20:53:17+01:00",
+    "content_hash": "sha256:c5366754ae35d7409766f5740460f025e730768a4abe89337dc0b38e1832ef92",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\model\\ctc_model.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 1227,
+    "modified_at": "2026-02-26T11:57:20+01:00",
+    "content_hash": "sha256:0574e941bd015ef3ba766733b7bb3171f7cd1bae33ef0534f223301cb089bf60",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\model\\encoder.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 5658,
+    "modified_at": "2026-02-25T21:48:17+01:00",
+    "content_hash": "sha256:5a7b3d4d06ff18a037785da7046c35c21eee3f6a86a90598a8afe97665cf3f55",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\model\\feature_extractor.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 4187,
+    "modified_at": "2026-03-01T10:57:32+01:00",
+    "content_hash": "sha256:ee25e3bef42d092eb4c03ff4d711b2f23db000b9e29f219ef9344e86e829bf3e",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\model\\feature_projection.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 803,
+    "modified_at": "2026-02-24T20:08:51+01:00",
+    "content_hash": "sha256:09ace75dd7f540916dc5bd2d284c43affa73d3d49bc4ae44a3f6bc4280f5a36b",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\model\\layers.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 3058,
+    "modified_at": "2026-02-25T21:24:30+01:00",
+    "content_hash": "sha256:75367b77e9162246af3e352b67bc1458c2f20ccbab9cb04c0c9d5a2c97c3ec9d",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\model\\mod.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 142,
+    "modified_at": "2026-02-24T20:09:26+01:00",
+    "content_hash": "sha256:054834144cf8e907d20bbe34d957e62994acbec77dfdeec823281c2c4799191a",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\builder.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 10442,
+    "modified_at": "2026-03-11T20:53:17+01:00",
+    "content_hash": "sha256:97ec44da92cba90ce4b4f24929cfe3177b27742a43216203870a3d48e6c91a81",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\cuda_forward.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 2334,
+    "modified_at": "2026-03-01T10:57:14+01:00",
+    "content_hash": "sha256:df84ae2f61e0f407ef572392964c411eb2ea374ef61b153c5501112f548858ca",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\defaults.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 5404,
+    "modified_at": "2026-03-11T20:53:17+01:00",
+    "content_hash": "sha256:1a95b26d4490d8bd98378fac426c080b9eaf83553db9a21c70212141409b739e",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\memory_tracker.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 8188,
+    "modified_at": "2026-03-01T15:14:07+01:00",
+    "content_hash": "sha256:2c7b5b9a89abffdb286fd74cf901a52f16ba4d0be7d25a80aa6a31e6fbaac52a",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\mod.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 228,
+    "modified_at": "2026-03-01T09:45:15+01:00",
+    "content_hash": "sha256:8cb04860d9a1bd2a50505d86cd6d5ad7e90cf51d542338825bddb158a77c815d",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\model_runtime.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 16857,
+    "modified_at": "2026-03-01T15:14:07+01:00",
+    "content_hash": "sha256:7a483e75539088c8e98713af1e4e226848efa78b90cce5a26e97de5dd16b9257",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\runtime.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 27221,
+    "modified_at": "2026-04-26T16:05:25+02:00",
+    "content_hash": "sha256:01565b9198789b183c72c860054abb064436eaaac953284b862f2fff1c726170",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\pipeline\\traits.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 7877,
+    "modified_at": "2026-03-11T20:53:17+01:00",
+    "content_hash": "sha256:d828d824d73fd1f0bebf47b1ad9b1b744c2b134cf4ef7ab50d4f7fc4ac36c27e",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "C:\\Users\\djden\\source\\repos\\wav2vec2-rs\\src\\types.rs": {
+    "ingested_at": "2026-04-26T16:10:03+02:00",
+    "size_bytes": 1919,
+    "modified_at": "2026-03-11T20:04:55+01:00",
+    "content_hash": "sha256:d4fdbee3b2fc8f407f5d555d16243220422cbdaf4bc4a165b1bd286083b661e1",
+    "source_type": "document",
+    "project": "wav2vec2-rs",
+    "pages_created": [
+      "projects/wav2vec2-rs/concepts/forced-alignment-pipeline.md",
+      "projects/wav2vec2-rs/concepts/builder-component-architecture.md",
+      "projects/wav2vec2-rs/concepts/model-runtimes.md",
+      "projects/wav2vec2-rs/concepts/ctc-viterbi-backends.md",
+      "projects/wav2vec2-rs/concepts/tokenization-and-word-grouping.md",
+      "projects/wav2vec2-rs/concepts/reports-and-benchmarks.md"
+    ],
+    "pages_updated": [
+      "projects/wav2vec2-rs.md",
+      "concepts/french-phoneme-ctc-grouping.md"
+    ]
+  },
+  "stats": {
+    "total_sources_ingested": 84,
+    "total_pages": 12,
+    "updated_at": "2026-04-26T16:10:03+02:00"
+  }
+}
